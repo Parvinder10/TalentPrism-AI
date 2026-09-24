@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "framework": "vite",
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "rewrites": [
+    {
+      "source": "/api",
+      "destination": "/api/index.py?__path__="
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py?__path__=$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

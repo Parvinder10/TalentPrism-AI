@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+.venv/
+venv/
+env/
+
+# Build artifacts
+frontend/dist/
+dist/
+
+# Vercel & Environment
+.vercel/
+.env*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,42 @@
+%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length 450 >> stream
+BT
+/F1 16 Tf
+50 720 Td
+(Marcus Vance - Principal Backend Engineer) Tj
+/F1 12 Tf
+0 -30 Td
+(Email: marcus.vance@devmail.io | San Francisco, CA) Tj
+0 -25 Td
+(SUMMARY: 6+ years designing balanced, high-reliability microservice ecosystems.) Tj
+0 -30 Td
+(EXPERIENCE:) Tj
+0 -20 Td
+(Apex Systems - Principal Architect (2022 - Present)) Tj
+0 -15 Td
+(- Production Python and FastAPI distributed architectures.) Tj
+0 -15 Td
+(- PostgreSQL schema tuning and SQL query optimization.) Tj
+0 -15 Td
+(- Multi-stage Docker containerization and AWS ECS deployments.) Tj
+0 -25 Td
+(SKILLS: Python, FastAPI, SQL, REST APIs, Docker, AWS, Redis, Kubernetes) Tj
+ET
+endstream
+endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000227 00000 n 
+0000000730 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+800
+%%EOF

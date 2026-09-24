@@ -1,0 +1,42 @@
+%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length 460 >> stream
+BT
+/F1 16 Tf
+50 720 Td
+(Chloe Lefebvre - Ingenieure Backend & APIs) Tj
+/F1 12 Tf
+0 -30 Td
+(Email: chloe.lefebvre@devmail.io | Paris, France) Tj
+0 -25 Td
+(RESUME: Conception de microservices haute performance avec Python et FastAPI.) Tj
+0 -30 Td
+(EXPERIENCE PROFESSIONNELLE:) Tj
+0 -20 Td
+(Criteo Labs - Ingenieure Plateforme API (2022 - Present)) Tj
+0 -15 Td
+(- Developpement d endpoints CRUD avec FastAPI et architecture REST.) Tj
+0 -15 Td
+(- Optimisation des requetes SQL complexes sous PostgreSQL.) Tj
+0 -15 Td
+(- Deploiement de conteneurs avec Docker et pipelines CI/CD Jenkins.) Tj
+0 -25 Td
+(COMPETENCES: Python, FastAPI, SQL, REST APIs, Docker, AWS, Redis) Tj
+ET
+endstream
+endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000227 00000 n 
+0000000740 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+810
+%%EOF

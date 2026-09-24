@@ -1,0 +1,23 @@
+services:
+  talentprism:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://prism_user:prism_secret@db:5432/talentprism
+    depends_on:
+      - db
+
+  db:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=prism_user
+      - POSTGRES_PASSWORD=prism_secret
+      - POSTGRES_DB=talentprism
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
