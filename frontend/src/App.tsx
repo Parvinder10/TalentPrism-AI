@@ -17,6 +17,7 @@ import { DemoTourModal } from './components/DemoTourModal';
 import { ManualAddJDModal } from './components/ManualAddJDModal';
 import { api } from './api/client';
 import { RankedCandidate, JobRequirement, JobRole, User } from './types';
+import { storage } from './utils/storage';
 
 export function App() {
   // Authentication State - default to null so login page is always the very first page
@@ -25,12 +26,48 @@ export function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [candidates, setCandidates] = useState<RankedCandidate[]>([]);
-  const [requirements, setRequirements] = useState<JobRequirement[]>([]);
-  const [availableRoles, setAvailableRoles] = useState<JobRole[]>([]);
-  const [currentRoleId, setCurrentRoleId] = useState<string>('job_backend_core');
-  const [loading, setLoading] = useState<boolean>(true);
+  // Active tab - persisted across refreshes
+  const [activeTab, setActiveTabState] = useState<string>(() => storage.getActiveTab('dashboard'));
+  const setActiveTab = (tab: string) => {
+    setActiveTabState(tab);
+    storage.setActiveTab(tab);
+  };
+
+  // Active role ID - persisted across refreshes
+  const [currentRoleId, setCurrentRoleIdState] = useState<string>(() =>
+    storage.getCurrentRoleId('job_backend_core')
+  );
+  const setCurrentRoleId = (roleId: string) => {
+    setCurrentRoleIdState(roleId);
+    storage.setCurrentRoleId(roleId);
+  };
+
+  // Candidates - initialized from local cache for zero-flicker reload
+  const [candidates, setCandidates] = useState<RankedCandidate[]>(() => {
+    const roleId = storage.getCurrentRoleId('job_backend_core');
+    const cached = storage.getCachedCandidates(roleId);
+    const removedIds = storage.getRemovedCandidateIds();
+    if (cached && cached.length > 0) {
+      return cached.filter((c) => !removedIds.includes(c.id));
+    }
+    return [];
+  });
+
+  const [requirements, setRequirements] = useState<JobRequirement[]>(() => {
+    const roleId = storage.getCurrentRoleId('job_backend_core');
+    return storage.getCalibratedRequirements(roleId) || [];
+  });
+
+  const [availableRoles, setAvailableRoles] = useState<JobRole[]>(() => {
+    return storage.getCustomRoles();
+  });
+
+  // If cached candidates exist, do not block with full page spinner!
+  const [loading, setLoading] = useState<boolean>(() => {
+    const roleId = storage.getCurrentRoleId('job_backend_core');
+    const cached = storage.getCachedCandidates(roleId);
+    return !cached || cached.length === 0;
+  });
 
   // Modals state
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
@@ -47,18 +84,52 @@ export function App() {
 
   const loadInitialData = async () => {
     try {
-      setLoading(true);
+      const storedRoleId = storage.getCurrentRoleId('job_backend_core');
+      const customRoles = storage.getCustomRoles();
+      const removedIds = storage.getRemovedCandidateIds();
+      const calibratedReqs = storage.getCalibratedRequirements(storedRoleId);
+      const weights = storage.getScoringWeights();
+
+      // Synchronize browser persistent state with the backend Python worker
+      try {
+        await api.syncState({
+          custom_roles: customRoles,
+          active_role_id: storedRoleId,
+          removed_candidate_ids: removedIds,
+          custom_requirements: calibratedReqs || undefined,
+          scoring_weights: weights || undefined,
+        });
+      } catch (syncErr) {
+        console.warn('Backend state sync warning:', syncErr);
+      }
+
+      // Fetch current candidates, job specs, and role catalog
       const [candData, jobData, rolesData] = await Promise.all([
         api.getCandidates(),
-        api.getJob('current'),
+        api.getJob(storedRoleId).catch(() => api.getJob('current')),
         api.getRoles(),
       ]);
-      setCandidates(candData);
-      setRequirements(jobData.requirements || []);
-      setAvailableRoles(rolesData || []);
-      if (jobData.id) {
-        setCurrentRoleId(jobData.id);
+
+      // Merge backend roles with custom roles stored in browser
+      const mergedRolesMap = new Map<string, JobRole>();
+      (rolesData || []).forEach((r) => mergedRolesMap.set(r.id, r));
+      customRoles.forEach((r) => mergedRolesMap.set(r.id, r));
+      const mergedRoles = Array.from(mergedRolesMap.values());
+      setAvailableRoles(mergedRoles);
+
+      // Filter out any candidates dismissed by the recruiter
+      const filteredCandidates = (candData || []).filter((c) => !removedIds.includes(c.id));
+      setCandidates(filteredCandidates);
+      storage.saveCachedCandidates(storedRoleId, filteredCandidates);
+
+      // Priority for requirements: calibrated user edits > jobData from API
+      if (calibratedReqs && calibratedReqs.length > 0) {
+        setRequirements(calibratedReqs);
+      } else if (jobData?.requirements) {
+        setRequirements(jobData.requirements);
       }
+
+      setCurrentRoleId(storedRoleId);
     } catch (e) {
       console.error('Failed to load initial data:', e);
     } finally {
@@ -80,16 +151,29 @@ export function App() {
     try {
       setLoading(true);
       setCurrentRoleId(roleId);
-      const res = await api.selectRole(roleId);
-      if (res.job) {
+
+      const targetRole = availableRoles.find((r) => r.id === roleId);
+      const removedIds = storage.getRemovedCandidateIds();
+
+      const res = await api.selectRole(roleId, targetRole);
+
+      const storedReqs = storage.getCalibratedRequirements(roleId);
+      if (storedReqs && storedReqs.length > 0) {
+        setRequirements(storedReqs);
+      } else if (res.job) {
         setRequirements(res.job.requirements || []);
       }
+
+      let newCandidates: RankedCandidate[] = [];
       if (res.ranked_candidates) {
-        setCandidates(res.ranked_candidates);
+        newCandidates = res.ranked_candidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
       } else {
         const freshCandidates = await api.getCandidates();
-        setCandidates(freshCandidates);
+        newCandidates = freshCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
       }
+
+      setCandidates(newCandidates);
+      storage.saveCachedCandidates(roleId, newCandidates);
     } catch (e) {
       console.error('Failed to switch job role:', e);
     } finally {
@@ -108,37 +192,72 @@ export function App() {
   };
 
   const handleRequirementsUpdated = async (newReqs: JobRequirement[]) => {
+    storage.saveCalibratedRequirements(currentRoleId, newReqs);
     setRequirements(newReqs);
     const updatedCandidates = await api.getCandidates();
-    setCandidates(updatedCandidates);
+    const removedIds = storage.getRemovedCandidateIds();
+    const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
+    setCandidates(filtered);
+    storage.saveCachedCandidates(currentRoleId, filtered);
   };
 
   const handleUploadSuccess = async () => {
     const updatedCandidates = await api.getCandidates();
-    setCandidates(updatedCandidates);
+    const removedIds = storage.getRemovedCandidateIds();
+    const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
+    setCandidates(filtered);
+    storage.saveCachedCandidates(currentRoleId, filtered);
   };
 
   const handleRoleCreated = (newRole: JobRole, updatedCandidates?: RankedCandidate[]) => {
+    storage.saveCustomRole(newRole);
+    storage.setCurrentRoleId(newRole.id);
+
     setAvailableRoles((prev) => {
-      if (prev.some((r) => r.id === newRole.id)) return prev;
-      return [...prev, newRole];
+      const exists = prev.some((r) => r.id === newRole.id);
+      return exists ? prev.map((r) => (r.id === newRole.id ? newRole : r)) : [...prev, newRole];
     });
+
     setCurrentRoleId(newRole.id);
     setRequirements(newRole.requirements || []);
+
     if (updatedCandidates) {
-      setCandidates(updatedCandidates);
+      const removedIds = storage.getRemovedCandidateIds();
+      const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
+      setCandidates(filtered);
+      storage.saveCachedCandidates(newRole.id, filtered);
     }
   };
 
   const handleRemoveCandidate = async (candidateId: string, candidateName: string) => {
     try {
-      setCandidates((prev) => prev.filter((c) => c.id !== candidateId));
-      const res = await api.deleteCandidate(candidateId);
-      if (res.remaining_candidates) {
-        setCandidates(res.remaining_candidates);
-      }
+      storage.addRemovedCandidateId(candidateId);
+      setCandidates((prev) => {
+        const updated = prev.filter((c) => c.id !== candidateId);
+        storage.saveCachedCandidates(currentRoleId, updated);
+        return updated;
+      });
+      await api.deleteCandidate(candidateId);
     } catch (err) {
       console.error('Failed to remove candidate:', err);
+    }
+  };
+
+  const handleResetDemoData = async () => {
+    if (
+      window.confirm(
+        'Reset all demo data back to default factory state? This will clear custom JDs, re-admit dismissed candidates, and restore default rankings.'
+      )
+    ) {
+      try {
+        setLoading(true);
+        storage.resetAllState();
+        await api.resetDemoData();
+        window.location.reload();
+      } catch (e) {
+        console.error('Failed to reset demo data:', e);
+        window.location.reload();
+      }
     }
   };
 
@@ -175,6 +294,7 @@ export function App() {
         currentUser={currentUser}
         onLogout={handleLogout}
         onOpenManualAddJD={() => setIsManualAddJDOpen(true)}
+        onResetDemoData={handleResetDemoData}
       />
 
       {/* Main Container */}

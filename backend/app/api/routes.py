@@ -99,13 +99,18 @@ def get_all_roles():
     return list(PRECONFIGURED_ROLES.values())
 
 @router.post("/jobs/select-role")
-def select_job_role(payload: Dict[str, str] = Body(...)):
+def select_job_role(payload: Dict[str, Any] = Body(...)):
     """
     Select an active Job Role (e.g. Senior Backend Engineer, Full Stack, Data Engineer, etc.).
     Immediately re-evaluates all candidate portfolios and recalculates live rankings!
     """
     global current_job
     role_id = payload.get("role_id", "job_backend_core")
+    role_data = payload.get("role_data")
+
+    if role_data and isinstance(role_data, dict):
+        PRECONFIGURED_ROLES[role_id] = role_data
+
     if role_id not in PRECONFIGURED_ROLES:
         raise HTTPException(status_code=404, detail="Role specification not found")
 
@@ -130,10 +135,89 @@ def select_job_role(payload: Dict[str, str] = Body(...)):
         "ranked_candidates": ranked
     }
 
+@router.post("/sync/state")
+def sync_state(payload: Dict[str, Any] = Body(...)):
+    """
+    Sync client-side persistent state (custom roles, active role ID, removed candidates, custom requirements)
+    to the active backend worker.
+    """
+    global current_job, candidates_store, current_weights
+    
+    # 1. Register any custom roles from client
+    custom_roles = payload.get("custom_roles", [])
+    for r in custom_roles:
+        r_id = r.get("id")
+        if r_id:
+            PRECONFIGURED_ROLES[r_id] = r
+            
+    # 2. Set active role if specified
+    active_role_id = payload.get("active_role_id")
+    if active_role_id and active_role_id in PRECONFIGURED_ROLES:
+        current_job = dict(PRECONFIGURED_ROLES[active_role_id])
+    
+    # 3. Apply custom calibrated requirements if specified
+    custom_reqs = payload.get("custom_requirements")
+    if custom_reqs and isinstance(custom_reqs, list):
+        current_job["requirements"] = custom_reqs
+        if active_role_id and active_role_id in PRECONFIGURED_ROLES:
+            PRECONFIGURED_ROLES[active_role_id]["requirements"] = custom_reqs
+
+    # 4. Apply custom scoring weights if specified
+    weights = payload.get("scoring_weights")
+    if weights and isinstance(weights, dict):
+        try:
+            current_weights = ScoringWeights(**weights)
+        except Exception:
+            pass
+
+    # 5. Apply removed candidate IDs
+    removed_ids = payload.get("removed_candidate_ids", [])
+    for rid in removed_ids:
+        if rid in candidates_store:
+            candidates_store.pop(rid, None)
+            
+    reevaluate_candidates_for_job(current_job["requirements"])
+    refresh_baseline_ranking()
+    ranked, _ = scoring_engine.rank_candidates(
+        list(candidates_store.values()),
+        current_job["requirements"],
+        current_weights
+    )
+
+    return {
+        "success": True,
+        "active_job": current_job,
+        "available_roles": list(PRECONFIGURED_ROLES.values()),
+        "ranked_candidates": ranked
+    }
+
+@router.post("/reset/demo-data")
+def reset_demo_data():
+    """Reset candidate store and roles back to default factory seed data."""
+    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES
+    from app.services.seed_data import GLOBAL_JOB, GLOBAL_CANDIDATES, PRECONFIGURED_ROLES as DEFAULT_ROLES
+    PRECONFIGURED_ROLES = dict(DEFAULT_ROLES)
+    current_job = dict(GLOBAL_JOB)
+    candidates_store = {c["id"]: dict(c) for c in GLOBAL_CANDIDATES}
+    current_weights = ScoringWeights()
+    refresh_baseline_ranking()
+    ranked, _ = scoring_engine.rank_candidates(
+        list(candidates_store.values()),
+        current_job["requirements"],
+        current_weights
+    )
+    return {
+        "success": True,
+        "message": "Reset to factory seed data complete",
+        "active_job": current_job,
+        "available_roles": list(PRECONFIGURED_ROLES.values()),
+        "ranked_candidates": ranked
+    }
+
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str):
-    if current_job["id"] != job_id and job_id != "current":
-        return current_job
+    if job_id != "current" and job_id in PRECONFIGURED_ROLES:
+        return PRECONFIGURED_ROLES[job_id]
     return current_job
 
 @router.post("/jobs")

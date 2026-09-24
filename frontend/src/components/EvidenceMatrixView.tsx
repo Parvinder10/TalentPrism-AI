@@ -15,6 +15,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { api } from '../api/client';
+import { storage } from '../utils/storage';
 
 interface EvidenceMatrixProps {
   onSelectCandidate: (candidateId: string) => void;
@@ -63,8 +64,11 @@ export const EvidenceMatrixView: React.FC<EvidenceMatrixProps> = ({ onSelectCand
   const showRequired = columnFilter === 'all' || columnFilter === 'required';
   const showPreferred = columnFilter === 'all' || columnFilter === 'preferred';
 
-  const filteredRows = rows.filter((r: any) =>
-    r.candidate_name.toLowerCase().includes(search.toLowerCase())
+  const removedCandidateIds = storage.getRemovedCandidateIds();
+  const filteredRows = rows.filter(
+    (r: any) =>
+      !removedCandidateIds.includes(r.candidate_id) &&
+      r.candidate_name.toLowerCase().includes(search.toLowerCase())
   );
 
   // PROFESSIONALLY VIBRANT AND LOUD COLOR FUNCTION

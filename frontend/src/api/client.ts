@@ -29,11 +29,34 @@ export const api = {
     return res.json();
   },
 
-  selectRole: async (roleId: string) => {
+  selectRole: async (roleId: string, roleData?: JobRole) => {
     const res = await fetch(`${API_BASE}/jobs/select-role`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role_id: roleId }),
+      body: JSON.stringify({ role_id: roleId, role_data: roleData }),
+    });
+    return res.json();
+  },
+
+  syncState: async (payload: {
+    active_role_id?: string;
+    custom_roles?: JobRole[];
+    removed_candidate_ids?: string[];
+    custom_requirements?: JobRequirement[];
+    scoring_weights?: ScoringWeights;
+  }) => {
+    const res = await fetch(`${API_BASE}/sync/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return res.json();
+  },
+
+  resetDemoData: async () => {
+    const res = await fetch(`${API_BASE}/reset/demo-data`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
     });
     return res.json();
   },

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { RankedCandidate, ScoringWeights } from '../types';
+import { storage } from '../utils/storage';
 
 interface WhatIfSimulatorViewProps {
   candidates: RankedCandidate[];
@@ -75,12 +76,16 @@ export const WhatIfSimulatorView: React.FC<WhatIfSimulatorViewProps> = ({
   const [simulatingSkill, setSimulatingSkill] = useState(false);
 
   // --- MODE 3: RECRUITER PRIORITY WEIGHTS STATE ---
-  const [weights, setWeights] = useState<ScoringWeights>({
-    required_skills: 0.40,
-    relevant_experience: 0.20,
-    evidence_strength: 0.20,
-    recency: 0.10,
-    preferred_skills: 0.10,
+  const [weights, setWeights] = useState<ScoringWeights>(() => {
+    return (
+      storage.getScoringWeights() || {
+        required_skills: 0.40,
+        relevant_experience: 0.20,
+        evidence_strength: 0.20,
+        recency: 0.10,
+        preferred_skills: 0.10,
+      }
+    );
   });
   const [scenarioCandidates, setScenarioCandidates] = useState<RankedCandidate[]>([]);
   const [simulatingWeights, setSimulatingWeights] = useState(false);
@@ -202,6 +207,7 @@ export const WhatIfSimulatorView: React.FC<WhatIfSimulatorViewProps> = ({
 
   const handleApplyWeightsToProduction = async () => {
     try {
+      storage.saveScoringWeights(weights);
       await api.recalculateRanking(
         currentRoleId,
         weights,
@@ -217,13 +223,15 @@ export const WhatIfSimulatorView: React.FC<WhatIfSimulatorViewProps> = ({
   };
 
   const handleResetWeights = () => {
-    setWeights({
+    const defaultWeights: ScoringWeights = {
       required_skills: 0.40,
       relevant_experience: 0.20,
       evidence_strength: 0.20,
       recency: 0.10,
       preferred_skills: 0.10,
-    });
+    };
+    setWeights(defaultWeights);
+    storage.saveScoringWeights(defaultWeights);
   };
 
   const totalWeight = Math.round(

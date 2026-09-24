@@ -11,6 +11,7 @@ import {
   Share2,
 } from 'lucide-react';
 import { api } from '../api/client';
+import { storage } from '../utils/storage';
 
 interface TalentRescueViewProps {
   onSelectCandidate: (candidateId: string) => void;
@@ -53,7 +54,13 @@ export const TalentRescueView: React.FC<TalentRescueViewProps> = ({ onSelectCand
     );
   }
 
-  const { within_role_rescue, cross_role_rescue } = rescueData;
+  const removedIds = storage.getRemovedCandidateIds();
+  const within_role_rescue = (rescueData.within_role_rescue || []).filter(
+    (c: any) => !removedIds.includes(c.candidate_id)
+  );
+  const cross_role_rescue = (rescueData.cross_role_rescue || []).filter(
+    (c: any) => !removedIds.includes(c.candidate_id)
+  );
 
   return (
     <div className="space-y-6">

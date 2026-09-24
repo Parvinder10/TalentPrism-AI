@@ -14,6 +14,7 @@ import {
   Building2,
   User as UserIcon,
   Plus,
+  RotateCcw,
 } from 'lucide-react';
 import { JobRole, User } from '../types';
 
@@ -30,6 +31,7 @@ interface HeaderProps {
   currentUser: User | null;
   onLogout: () => void;
   onOpenManualAddJD: () => void;
+  onResetDemoData?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,6 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentUser,
   onLogout,
   onOpenManualAddJD,
+  onResetDemoData,
 }) => {
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
 
@@ -76,7 +79,17 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-3">
+          {onResetDemoData && (
+            <button
+              onClick={onResetDemoData}
+              className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 hover:text-white border border-white/10 text-[11px] font-medium transition cursor-pointer"
+              title="Reset all demo data back to factory defaults"
+            >
+              <RotateCcw className="w-3 h-3 text-cyan-400" />
+              <span>Reset Demo</span>
+            </button>
+          )}
           <button
             onClick={onStartDemoTour}
             className="flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[11px] font-semibold transition cursor-pointer"
