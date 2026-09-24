@@ -282,4 +282,14 @@ export const api = {
     });
     return res.json();
   },
+
+  uploadResumeFiles: async (files: File[]) => {
+    const formData = new FormData();
+    files.forEach((f) => formData.append('files', f));
+    const res = await fetch(`${API_BASE}/resumes/upload-batch`, {
+      method: 'POST',
+      body: formData,
+    });
+    return res.json();
+  },
 };
