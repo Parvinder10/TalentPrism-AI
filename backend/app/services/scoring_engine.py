@@ -36,9 +36,19 @@ class ScoringEngine:
         - Recency score
         - Overall composite score
         """
-        required_reqs = [r for r in requirements if r.category == "REQUIRED"]
-        preferred_reqs = [r for r in requirements if r.category == "PREFERRED"]
-        bonus_reqs = [r for r in requirements if r.category == "BONUS"]
+        # Ensure all requirements are normalized to JobRequirement objects
+        normalized_reqs = []
+        for r in requirements:
+            if isinstance(r, JobRequirement):
+                normalized_reqs.append(r)
+            elif isinstance(r, dict):
+                normalized_reqs.append(JobRequirement(**r))
+            else:
+                normalized_reqs.append(r)
+
+        required_reqs = [r for r in normalized_reqs if r.category == "REQUIRED"]
+        preferred_reqs = [r for r in normalized_reqs if r.category == "PREFERRED"]
+        bonus_reqs = [r for r in normalized_reqs if r.category == "BONUS"]
 
         skill_evals: Dict[str, CandidateSkillEval] = candidate.get("skill_evals", {})
 
@@ -121,6 +131,16 @@ class ScoringEngine:
         """
         Rank candidate list, calculating rank movements and audit log.
         """
+        normalized_reqs = []
+        for r in requirements:
+            if isinstance(r, JobRequirement):
+                normalized_reqs.append(r)
+            elif isinstance(r, dict):
+                normalized_reqs.append(JobRequirement(**r))
+            else:
+                normalized_reqs.append(r)
+        requirements = normalized_reqs
+
         scored_list = []
         for cand in candidates:
             score_res = self.compute_candidate_score(cand, requirements, weights)

@@ -7,11 +7,26 @@ import {
 
 const API_BASE = '/api';
 
+async function handleResponse<T = any>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let detail = '';
+    try {
+      const data = JSON.parse(text);
+      detail = data.detail || data.message || data.error;
+    } catch {
+      // Not JSON
+    }
+    throw new Error(detail || text || `Request failed with status ${res.status}`);
+  }
+  return res.json();
+}
+
 export const api = {
   // Health & Auth
   checkHealth: async () => {
     const res = await fetch(`${API_BASE}/health`);
-    return res.json();
+    return handleResponse(res);
   },
 
   login: async (credentials: { name?: string; email?: string; role?: string; organization?: string; password?: string }) => {
@@ -20,13 +35,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(credentials),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   // Jobs & Roles
   getRoles: async (): Promise<JobRole[]> => {
     const res = await fetch(`${API_BASE}/jobs/roles`);
-    return res.json();
+    return handleResponse(res);
   },
 
   selectRole: async (roleId: string, roleData?: JobRole) => {
@@ -35,7 +50,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role_id: roleId, role_data: roleData }),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   syncState: async (payload: {
@@ -50,7 +65,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   resetDemoData: async () => {
@@ -58,17 +73,17 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   getJobs: async () => {
     const res = await fetch(`${API_BASE}/jobs`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getJob: async (id: string = 'current') => {
     const res = await fetch(`${API_BASE}/jobs/${id}`);
-    return res.json();
+    return handleResponse(res);
   },
 
   parseJobText: async (id: string, text: string) => {
@@ -77,7 +92,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   uploadJD: async (file: File) => {
@@ -87,7 +102,7 @@ export const api = {
       method: 'POST',
       body: formData,
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   parseJDText: async (text: string) => {
@@ -96,7 +111,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   createJob: async (jobData: {
@@ -110,7 +125,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(jobData),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   updateJobRequirements: async (id: string, requirements: JobRequirement[]) => {
@@ -119,55 +134,55 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requirements }),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   // Candidates & Ranking
   getCandidates: async (): Promise<RankedCandidate[]> => {
     const res = await fetch(`${API_BASE}/candidates`);
-    return res.json();
+    return handleResponse(res);
   },
 
   deleteCandidate: async (candidateId: string) => {
     const res = await fetch(`${API_BASE}/candidates/${candidateId}`, {
       method: 'DELETE',
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   getCandidate: async (id: string) => {
     const res = await fetch(`${API_BASE}/candidates/${id}`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getCandidateSkills: async (id: string): Promise<CandidateSkillEval[]> => {
     const res = await fetch(`${API_BASE}/candidates/${id}/skills`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getCandidateGraph: async (id: string): Promise<SkillGraphData> => {
     const res = await fetch(`${API_BASE}/candidates/${id}/graph`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getCandidateTimeline: async (id: string): Promise<TimelineYearGroup[]> => {
     const res = await fetch(`${API_BASE}/candidates/${id}/timeline`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getCandidateEvidence: async (id: string): Promise<EvidenceItem[]> => {
     const res = await fetch(`${API_BASE}/candidates/${id}/evidence`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getCandidatePassport: async (id: string): Promise<CandidatePassport> => {
     const res = await fetch(`${API_BASE}/candidates/${id}/passport`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getRanking: async (jobId: string = 'job_backend_core') => {
     const res = await fetch(`${API_BASE}/jobs/${jobId}/ranking`);
-    return res.json();
+    return handleResponse(res);
   },
 
   recalculateRanking: async (
@@ -181,29 +196,29 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ weights, requirements, reason }),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   // Why / Why Not
   getWhyCandidate: async (id: string) => {
     const res = await fetch(`${API_BASE}/candidates/${id}/why`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getWhyNotHigher: async (id: string) => {
     const res = await fetch(`${API_BASE}/candidates/${id}/why-not`);
-    return res.json();
+    return handleResponse(res);
   },
 
   // Talent Lens & Rescue
   getTalentLens: async (id: string): Promise<TalentLensInsight> => {
     const res = await fetch(`${API_BASE}/candidates/${id}/talent-lens`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getTalentRescue: async (jobId: string = 'job_backend_core') => {
     const res = await fetch(`${API_BASE}/jobs/${jobId}/talent-rescue`);
-    return res.json();
+    return handleResponse(res);
   },
 
   // Simulation
@@ -213,7 +228,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ weights }),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   simulateSkillScenario: async (candidateId: string, skillName: string, strength: number) => {
@@ -226,7 +241,7 @@ export const api = {
         simulated_evidence_strength: strength,
       }),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   poolBySkills: async (jobId: string = 'job_backend_core', skills: string[]) => {
@@ -235,41 +250,41 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skills }),
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   // Team & Interview
   getTeamSkills: async (teamId: string = 'backend_team') => {
     const res = await fetch(`${API_BASE}/teams/${teamId}/skills`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getCandidateTeamMatch: async (candidateId: string): Promise<TeamMatchAnalysis> => {
     const res = await fetch(`${API_BASE}/candidates/${candidateId}/team-match`);
-    return res.json();
+    return handleResponse(res);
   },
 
   createInterviewPlan: async (candidateId: string): Promise<InterviewPlan> => {
     const res = await fetch(`${API_BASE}/candidates/${candidateId}/interview-plan`, {
       method: 'POST',
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   // Pool Analytics, Matrix, Audit
   getPoolIntelligence: async (jobId: string = 'job_backend_core') => {
     const res = await fetch(`${API_BASE}/jobs/${jobId}/pool-intelligence`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getEvidenceMatrix: async (jobId: string = 'job_backend_core') => {
     const res = await fetch(`${API_BASE}/jobs/${jobId}/evidence-matrix`);
-    return res.json();
+    return handleResponse(res);
   },
 
   getRankingHistory: async (jobId: string = 'job_backend_core'): Promise<RankingAuditEntry[]> => {
     const res = await fetch(`${API_BASE}/jobs/${jobId}/ranking-history`);
-    return res.json();
+    return handleResponse(res);
   },
 
   // Resume Upload
@@ -280,7 +295,7 @@ export const api = {
       method: 'POST',
       body: formData,
     });
-    return res.json();
+    return handleResponse(res);
   },
 
   uploadResumeFiles: async (files: File[]) => {
@@ -290,6 +305,6 @@ export const api = {
       method: 'POST',
       body: formData,
     });
-    return res.json();
+    return handleResponse(res);
   },
 };

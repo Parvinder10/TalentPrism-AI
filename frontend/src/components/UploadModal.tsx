@@ -119,7 +119,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUploadSucce
       onUploadSuccess(res.candidates);
     } catch (err: any) {
       console.error('Sample batch load error:', err);
-      setError('Failed to process sample resumes batch.');
+      setError(err.message || 'Failed to process sample resumes batch.');
     } finally {
       setUploading(false);
     }

@@ -1,6 +1,20 @@
 from typing import Dict, List, Any
 from app.models.schemas import JobRequirement, CandidateSkillEval
 
+def _normalize_req(req: Any) -> JobRequirement:
+    if isinstance(req, JobRequirement):
+        return req
+    if isinstance(req, dict):
+        return JobRequirement(**req)
+    return JobRequirement(
+        id=str(getattr(req, "id", "req")),
+        name=str(getattr(req, "name", "Skill")),
+        category=str(getattr(req, "category", "REQUIRED")),
+        priority=str(getattr(req, "priority", "High")),
+        weight=float(getattr(req, "weight", 1.0)),
+        canonical_skill=str(getattr(req, "canonical_skill", getattr(req, "name", "Skill")))
+    )
+
 class PoolIntelligenceEngine:
     def __init__(self):
         pass
@@ -8,12 +22,13 @@ class PoolIntelligenceEngine:
     def compute_pool_analytics(
         self,
         candidates: List[Dict[str, Any]],
-        requirements: List[JobRequirement]
+        requirements: List[Any]
     ) -> Dict[str, Any]:
         """
         Analyze the full applicant pool distribution, availability percentages,
         rare skill combinations, and JD Expectation Signals.
         """
+        requirements = [_normalize_req(r) for r in requirements]
         total = len(candidates)
         if total == 0:
             return {}
@@ -115,12 +130,13 @@ class PoolIntelligenceEngine:
     def build_evidence_matrix(
         self,
         candidates: List[Dict[str, Any]],
-        requirements: List[JobRequirement]
+        requirements: List[Any]
     ) -> Dict[str, Any]:
         """
         Build the interactive Heatmap matrix: Candidates x Requirements.
         Allows filtering by Required/Preferred and cell drilldowns.
         """
+        requirements = [_normalize_req(r) for r in requirements]
         required_cols = [r.name for r in requirements if r.category == "REQUIRED"]
         preferred_cols = [r.name for r in requirements if r.category == "PREFERRED"]
 

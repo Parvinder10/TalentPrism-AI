@@ -27,12 +27,36 @@ candidates_store: Dict[str, Dict[str, Any]] = {c["id"]: dict(c) for c in GLOBAL_
 current_weights = ScoringWeights()
 previous_ranks_cache: Dict[str, int] = {}
 
-def reevaluate_candidates_for_job(job_reqs: List[JobRequirement]):
+def normalize_requirement(req: Any) -> JobRequirement:
+    """Safely converts a dict or model into a valid JobRequirement instance."""
+    if isinstance(req, JobRequirement):
+        return req
+    if isinstance(req, dict):
+        return JobRequirement(**req)
+    return JobRequirement(
+        id=str(getattr(req, "id", f"req_{uuid.uuid4().hex[:6]}")),
+        name=str(getattr(req, "name", "Skill")),
+        category=str(getattr(req, "category", "REQUIRED")),
+        priority=str(getattr(req, "priority", "High")),
+        weight=float(getattr(req, "weight", 1.0)),
+        canonical_skill=str(getattr(req, "canonical_skill", getattr(req, "name", "Skill")))
+    )
+
+def get_current_job_requirements() -> List[JobRequirement]:
+    """Retrieves and normalizes current_job requirements."""
+    global current_job
+    raw_reqs = current_job.get("requirements", [])
+    normalized = [normalize_requirement(r) for r in raw_reqs]
+    current_job["requirements"] = normalized
+    return normalized
+
+def reevaluate_candidates_for_job(job_reqs: List[Any]):
     """Dynamically re-evaluate all candidates against a specific job role's requirements."""
+    normalized_reqs = [normalize_requirement(r) for r in job_reqs]
     for c_id, cand in candidates_store.items():
         portfolio = cand.get("all_skills_portfolio", {})
         new_evals = {}
-        for req in job_reqs:
+        for req in normalized_reqs:
             score = float(portfolio.get(req.name, 45.0))
             gap = max(0.0, 100.0 - score)
             status = "SUPPORTED BY EVIDENCE" if score >= 80 else ("EXPLICITLY LISTED" if score >= 50 else "LIMITED EVIDENCE")
@@ -117,6 +141,7 @@ def select_job_role(payload: Dict[str, Any] = Body(...)):
 
     selected = PRECONFIGURED_ROLES[role_id]
     current_job = dict(selected)
+    current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
     
     # Re-evaluate candidate skills against the new role
     reevaluate_candidates_for_job(current_job["requirements"])
@@ -159,9 +184,12 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
     # 3. Apply custom calibrated requirements if specified
     custom_reqs = payload.get("custom_requirements")
     if custom_reqs and isinstance(custom_reqs, list):
-        current_job["requirements"] = custom_reqs
+        norm_custom_reqs = [normalize_requirement(r) for r in custom_reqs]
+        current_job["requirements"] = norm_custom_reqs
         if active_role_id and active_role_id in PRECONFIGURED_ROLES:
-            PRECONFIGURED_ROLES[active_role_id]["requirements"] = custom_reqs
+            PRECONFIGURED_ROLES[active_role_id]["requirements"] = norm_custom_reqs
+    else:
+        current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
 
     # 4. Apply custom scoring weights if specified
     weights = payload.get("scoring_weights")
@@ -225,12 +253,13 @@ def get_job(job_id: str):
 def create_job(payload: JobCreate):
     global current_job
     job_id = f"job_{uuid.uuid4().hex[:8]}"
+    norm_reqs = [normalize_requirement(r) for r in payload.requirements]
     new_job = {
         "id": job_id,
         "title": payload.title,
         "department": payload.department,
         "description": payload.description,
-        "requirements": payload.requirements
+        "requirements": norm_reqs
     }
     current_job = new_job
     PRECONFIGURED_ROLES[job_id] = new_job
@@ -466,7 +495,7 @@ def update_job_requirements(job_id: str, payload: JobUpdateRequirements):
     Recruiter confirms criteria before ranking. Never silently change importance!
     """
     global current_job
-    current_job["requirements"] = payload.requirements
+    current_job["requirements"] = [normalize_requirement(r) for r in payload.requirements]
     reevaluate_candidates_for_job(current_job["requirements"])
     
     # Recalculate candidate rankings
@@ -494,110 +523,10 @@ def update_job_requirements(job_id: str, payload: JobUpdateRequirements):
 @router.post("/resumes/upload")
 async def upload_resume(file: UploadFile = File(...)):
     """
-    Upload and parse PDF resume:
+    Upload and parse PDF/text resume:
     Extract text -> spaCy NER -> Multilingual Detection -> Evidence Extraction -> Candidate Creation
     """
-    contents = await file.read()
-    parse_res = pdf_parser.extract_text_from_bytes(contents)
-    text = parse_res.get("text", "")
-    if not text:
-        text = "Experienced Python Backend Developer proficient in FastAPI, SQL, Docker, and REST APIs."
-
-    lang_res = nlp_engine.detect_language(text)
-    entities = nlp_engine.extract_entities_with_spacy(text)
-
-    cand_id = f"cand_upload_{uuid.uuid4().hex[:6]}"
-    filename = file.filename or "Uploaded_Candidate.pdf"
-    cand_name = filename.replace(".pdf", "").replace("_", " ").title()
-
-    # Create candidate evidence from extracted skills
-    evals = {}
-    ev_list = []
-    for req in current_job["requirements"]:
-        has_skill = req.name in entities.get("skills", [])
-        score = 82.0 if has_skill else 35.0
-        gap = 100.0 - score
-        eval_item = CandidateSkillEval(
-            skill_name=req.name,
-            category=req.category,
-            priority=req.priority,
-            detection_status="SUPPORTED BY EVIDENCE" if score >= 80 else "LIMITED EVIDENCE",
-            evidence_strength=score,
-            evidence_gap=gap,
-            is_semantic_match=False,
-            supporting_evidence_count=1 if has_skill else 0,
-            why_explanation=[
-                f"✓ Extracted via spaCy NER from {filename}" if has_skill else "✗ No explicit evidence detected in PDF"
-            ],
-            primary_source=filename
-        )
-        evals[req.name] = eval_item
-        ev_list.append(EvidenceItem(
-            id=f"ev_{cand_id}_{req.name.lower()}",
-            candidate_id=cand_id,
-            skill_name=req.name,
-            source_type="work_experience" if has_skill else "skills_list",
-            source_title=f"Parsed from {filename}",
-            source_text=f"Demonstrated {req.name} capabilities in uploaded resume.",
-            original_language=lang_res["code"],
-            classification="CONTEXTUALLY_SUPPORTED" if has_skill else "CLAIMED",
-            evidence_strength=score,
-            evidence_strength_level="HIGH" if score >= 80 else "LIMITED",
-            start_year=2024,
-            end_year=2025,
-            is_recent=True
-        ))
-
-    new_cand = {
-        "id": cand_id,
-        "name": cand_name,
-        "email": f"{cand_name.lower().replace(' ', '.')}@upload.io",
-        "current_title": "Backend Software Engineer",
-        "current_company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
-        "years_of_experience": 3.0,
-        "language": lang_res["code"],
-        "has_recent_activity": True,
-        "is_suppressed": False,
-        "archetype": "BALANCED EVIDENCE PROFILE",
-        "raw_evidence_strength": 68.0,
-        "skill_evals": evals,
-        "evidence_list": ev_list,
-        "experiences": [
-            {
-                "company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
-                "role": "Backend Engineer",
-                "years": "2023 - Present",
-                "year": 2024,
-                "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:4]
-            }
-        ],
-        "projects": [
-            {
-                "title": "Cloud Platform Service",
-                "year": 2024,
-                "description": "High performance backend platform.",
-                "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:3]
-            }
-        ],
-        "education": entities.get("schools", ["University Degree"]),
-        "certifications": [],
-        "notes": [{"author": "PDF Parser", "text": f"Successfully parsed {filename}. Detected language: {lang_res['name']}."}]
-    }
-
-    candidates_store[cand_id] = new_cand
-    refresh_baseline_ranking()
-    return {"candidate": new_cand, "language": lang_res, "entities": entities}
-
-@router.post("/resumes/upload-batch")
-async def upload_resumes_batch(files: List[UploadFile] = File(...)):
-    """
-    Batch upload multiple PDF/text resumes at once:
-    Extract text -> spaCy NER -> Language Detection -> Evidence Matrix -> Candidate Creation
-    Re-evaluates and recalculates live ranking once for the entire batch.
-    """
-    created_candidates = []
-    
-    for file in files:
+    try:
         contents = await file.read()
         filename = file.filename or "Uploaded_Candidate.pdf"
         parse_res = pdf_parser.extract_text_from_bytes(contents)
@@ -619,10 +548,12 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
         if len(cand_name) <= 2:
             cand_name = f"Candidate {uuid.uuid4().hex[:4].upper()}"
 
+        job_reqs = get_current_job_requirements()
+
         # Create candidate evidence from extracted skills
         evals = {}
         ev_list = []
-        for req in current_job["requirements"]:
+        for req in job_reqs:
             has_skill = req.name in entities.get("skills", [])
             score = 82.0 if has_skill else 35.0
             gap = 100.0 - score
@@ -661,7 +592,7 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
             "id": cand_id,
             "name": cand_name,
             "email": f"{cand_name.lower().replace(' ', '.')}@upload.io",
-            "current_title": "Software Engineer",
+            "current_title": "Backend Software Engineer",
             "current_company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
             "years_of_experience": 3.0,
             "language": lang_res["code"],
@@ -674,7 +605,7 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
             "experiences": [
                 {
                     "company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
-                    "role": "Software Engineer",
+                    "role": "Backend Engineer",
                     "years": "2023 - Present",
                     "year": 2024,
                     "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:4]
@@ -682,9 +613,9 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
             ],
             "projects": [
                 {
-                    "title": "Software Platform Service",
+                    "title": "Cloud Platform Service",
                     "year": 2024,
-                    "description": "High performance software system.",
+                    "description": "High performance backend platform.",
                     "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:3]
                 }
             ],
@@ -694,28 +625,147 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
         }
 
         candidates_store[cand_id] = new_cand
-        created_candidates.append(new_cand)
+        refresh_baseline_ranking()
+        return {"candidate": new_cand, "language": lang_res, "entities": entities}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to process resume: {str(e)}")
 
-    refresh_baseline_ranking()
-    ranked, _ = scoring_engine.rank_candidates(
-        list(candidates_store.values()),
-        current_job["requirements"],
-        current_weights,
-        previous_ranks=previous_ranks_cache,
-        reason=f"Recruiter batch-uploaded {len(files)} resumes"
-    )
+@router.post("/resumes/upload-batch")
+async def upload_resumes_batch(files: List[UploadFile] = File(...)):
+    """
+    Batch upload multiple PDF/text resumes at once:
+    Extract text -> spaCy NER -> Language Detection -> Evidence Matrix -> Candidate Creation
+    Re-evaluates and recalculates live ranking once for the entire batch.
+    """
+    try:
+        created_candidates = []
+        job_reqs = get_current_job_requirements()
+        
+        for file in files:
+            contents = await file.read()
+            filename = file.filename or "Uploaded_Candidate.pdf"
+            parse_res = pdf_parser.extract_text_from_bytes(contents)
+            text = parse_res.get("text", "")
+            if not text:
+                try:
+                    text = contents.decode("utf-8", errors="ignore")
+                except Exception:
+                    text = ""
+            if not text.strip():
+                text = f"Software Engineer experienced in {filename.replace('.pdf', '')} applications, distributed systems, and modern API architecture."
 
-    for r in ranked:
-        if r.id in candidates_store:
-            candidates_store[r.id]["rank"] = r.rank
-            candidates_store[r.id]["overall_match"] = r.overall_match
+            lang_res = nlp_engine.detect_language(text)
+            entities = nlp_engine.extract_entities_with_spacy(text)
 
-    return {
-        "success": True,
-        "uploaded_count": len(created_candidates),
-        "candidates": created_candidates,
-        "ranked_candidates": ranked
-    }
+            cand_id = f"cand_upload_{uuid.uuid4().hex[:6]}"
+            cand_name = re.sub(r"\.(pdf|docx?|txt|md)$", "", filename, flags=re.IGNORECASE)
+            cand_name = re.sub(r"[_\-]+", " ", cand_name).strip().title()
+            if len(cand_name) <= 2:
+                cand_name = f"Candidate {uuid.uuid4().hex[:4].upper()}"
+
+            # Create candidate evidence from extracted skills
+            evals = {}
+            ev_list = []
+            for req in job_reqs:
+                has_skill = req.name in entities.get("skills", [])
+                score = 82.0 if has_skill else 35.0
+                gap = 100.0 - score
+                eval_item = CandidateSkillEval(
+                    skill_name=req.name,
+                    category=req.category,
+                    priority=req.priority,
+                    detection_status="SUPPORTED BY EVIDENCE" if score >= 80 else "LIMITED EVIDENCE",
+                    evidence_strength=score,
+                    evidence_gap=gap,
+                    is_semantic_match=False,
+                    supporting_evidence_count=1 if has_skill else 0,
+                    why_explanation=[
+                        f"✓ Extracted via spaCy NER from {filename}" if has_skill else "✗ No explicit evidence detected in PDF"
+                    ],
+                    primary_source=filename
+                )
+                evals[req.name] = eval_item
+                ev_list.append(EvidenceItem(
+                    id=f"ev_{cand_id}_{req.name.lower()}",
+                    candidate_id=cand_id,
+                    skill_name=req.name,
+                    source_type="work_experience" if has_skill else "skills_list",
+                    source_title=f"Parsed from {filename}",
+                    source_text=f"Demonstrated {req.name} capabilities in uploaded resume.",
+                    original_language=lang_res["code"],
+                    classification="CONTEXTUALLY_SUPPORTED" if has_skill else "CLAIMED",
+                    evidence_strength=score,
+                    evidence_strength_level="HIGH" if score >= 80 else "LIMITED",
+                    start_year=2024,
+                    end_year=2025,
+                    is_recent=True
+                ))
+
+            new_cand = {
+                "id": cand_id,
+                "name": cand_name,
+                "email": f"{cand_name.lower().replace(' ', '.')}@upload.io",
+                "current_title": "Software Engineer",
+                "current_company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
+                "years_of_experience": 3.0,
+                "language": lang_res["code"],
+                "has_recent_activity": True,
+                "is_suppressed": False,
+                "archetype": "BALANCED EVIDENCE PROFILE",
+                "raw_evidence_strength": 68.0,
+                "skill_evals": evals,
+                "evidence_list": ev_list,
+                "experiences": [
+                    {
+                        "company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
+                        "role": "Software Engineer",
+                        "years": "2023 - Present",
+                        "year": 2024,
+                        "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:4]
+                    }
+                ],
+                "projects": [
+                    {
+                        "title": "Software Platform Service",
+                        "year": 2024,
+                        "description": "High performance software system.",
+                        "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:3]
+                    }
+                ],
+                "education": entities.get("schools", ["University Degree"]),
+                "certifications": [],
+                "notes": [{"author": "PDF Parser", "text": f"Successfully parsed {filename}. Detected language: {lang_res['name']}."}]
+            }
+
+            candidates_store[cand_id] = new_cand
+            created_candidates.append(new_cand)
+
+        refresh_baseline_ranking()
+        ranked, _ = scoring_engine.rank_candidates(
+            list(candidates_store.values()),
+            current_job["requirements"],
+            current_weights,
+            previous_ranks=previous_ranks_cache,
+            reason=f"Recruiter batch-uploaded {len(files)} resumes"
+        )
+
+        for r in ranked:
+            if r.id in candidates_store:
+                candidates_store[r.id]["rank"] = r.rank
+                candidates_store[r.id]["overall_match"] = r.overall_match
+
+        return {
+            "success": True,
+            "uploaded_count": len(created_candidates),
+            "candidates": created_candidates,
+            "ranked_candidates": ranked
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Batch upload failed: {str(e)}")
 
 @router.get("/candidates")
 def get_candidates():
