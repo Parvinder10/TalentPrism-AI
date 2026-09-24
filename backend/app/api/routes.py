@@ -1,4 +1,5 @@
 import uuid
+import re
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body
 from app.models.schemas import (
@@ -256,6 +257,199 @@ def create_job(payload: JobCreate):
         "all_roles": list(PRECONFIGURED_ROLES.values())
     }
 
+def parse_jd_text_helper(text: str, filename: str = "") -> Dict[str, Any]:
+    """
+    Intelligently parses uploaded JD documents or pasted JD text:
+    - Extracts Job Title (from header tags, labels, or top lines)
+    - Infers Department (from text labels or skill domain)
+    - Extracts Role Summary / Description
+    - Identifies & Categorizes Requirements into REQUIRED, PREFERRED, and BONUS with appropriate weights
+    """
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    
+    # 1. Job Title Extraction
+    title = ""
+    for line in lines[:20]:
+        m = re.search(r"^(?:job\s+title|title|role|position|job\s+name|opening)[\s:]+(.+)$", line, re.IGNORECASE)
+        if m:
+            candidate = re.sub(r"[\*#_\"'`]", "", m.group(1)).strip()
+            if 3 < len(candidate) < 70:
+                title = candidate
+                break
+
+    if not title:
+        for line in lines[:6]:
+            candidate = re.sub(r"[\*#_\"'`]", "", line).strip()
+            if 4 <= len(candidate) <= 60:
+                if not re.search(r"(about us|company|who we are|overview|welcome|location|salary|http|www|page \d|confidential)", candidate, re.IGNORECASE):
+                    title = candidate
+                    break
+
+    if not title and filename:
+        clean_fn = re.sub(r"\.(pdf|txt|docx?|md)$", "", filename, flags=re.IGNORECASE)
+        clean_fn = re.sub(r"[_\-]+", " ", clean_fn).strip().title()
+        if len(clean_fn) > 3 and not clean_fn.lower().startswith("job"):
+            title = clean_fn
+
+    if not title:
+        title = "Senior Software Engineer"
+
+    # 2. Extract Skills with nlp_engine + canonical dictionary
+    entities = nlp_engine.extract_entities_with_spacy(text)
+    detected_skills = list(entities.get("skills", []))
+
+    comprehensive_skills = [
+        "Python", "FastAPI", "Django", "Flask", "Go", "Java", "Spring Boot",
+        "React", "TypeScript", "JavaScript", "Next.js", "Node.js", "Vue", "Angular",
+        "Tailwind CSS", "HTML5", "CSS3", "GraphQL", "REST APIs", "Microservices",
+        "SQL", "PostgreSQL", "MySQL", "MongoDB", "Redis", "Elasticsearch", "Cassandra",
+        "Kafka", "RabbitMQ", "Docker", "Kubernetes", "AWS", "GCP", "Azure",
+        "Terraform", "CI/CD", "Linux", "Git", "System Architecture",
+        "PyTorch", "TensorFlow", "Pandas", "NumPy", "Apache Spark", "Airflow", "Snowflake", "dbt",
+        "Swift", "Kotlin", "React Native", "Flutter", "iOS", "Android",
+        "Cybersecurity", "OWASP", "SOC2", "Penetration Testing", "IAM", "Unit Testing", "Jest"
+    ]
+    text_lower = text.lower()
+    for sk in comprehensive_skills:
+        if sk not in detected_skills:
+            pattern = r"\b" + re.escape(sk.lower()) + r"\b"
+            if re.search(pattern, text_lower):
+                detected_skills.append(sk)
+
+    # 3. Department Extraction / Inference
+    department = ""
+    for line in lines[:25]:
+        m = re.search(r"^(?:department|team|division|group|org)[\s:]+(.+)$", line, re.IGNORECASE)
+        if m:
+            candidate_dept = re.sub(r"[\*#_\"'`]", "", m.group(1)).strip()
+            if 3 < len(candidate_dept) < 50:
+                department = candidate_dept
+                break
+
+    if not department:
+        skills_set = set([s.lower() for s in detected_skills])
+        title_lower = title.lower()
+        if any(w in title_lower for w in ["frontend", "react", "ui", "web", "full stack", "fullstack"]) or "react" in skills_set or "typescript" in skills_set:
+            department = "Product Engineering"
+        elif any(w in title_lower for w in ["devops", "cloud", "platform", "infrastructure", "sre", "reliability"]) or "kubernetes" in skills_set or "terraform" in skills_set:
+            department = "Cloud & Infrastructure Operations"
+        elif any(w in title_lower for w in ["data", "ml", "ai", "machine learning", "analytics"]) or "pytorch" in skills_set or "spark" in skills_set:
+            department = "Data Platform & Applied AI"
+        elif any(w in title_lower for w in ["security", "soc", "infosec", "trust", "cyber"]) or "owasp" in skills_set or "cybersecurity" in skills_set:
+            department = "Information Security & Compliance"
+        elif any(w in title_lower for w in ["mobile", "ios", "android", "flutter", "swift"]):
+            department = "Mobile Platform Engineering"
+        else:
+            department = "Core Engineering & Infrastructure"
+
+    # 4. Description Extraction
+    desc_lines = []
+    capture = False
+    for line in lines[:40]:
+        if re.search(r"(about the role|role summary|job summary|position summary|what you'll do|overview|the role)", line, re.IGNORECASE):
+            capture = True
+            continue
+        if capture:
+            if re.search(r"(requirements|qualifications|skills|what we offer|benefits|about you)", line, re.IGNORECASE):
+                break
+            desc_lines.append(line)
+            if len(desc_lines) >= 3:
+                break
+    if desc_lines:
+        description = " ".join(desc_lines)
+    else:
+        clean_lines = [l for l in lines[1:6] if len(l) > 25 and not re.search(r"(requirement|qualification|http|www|page \d)", l, re.IGNORECASE)]
+        description = " ".join(clean_lines[:2]) if clean_lines else f"{title} within {department} focused on scalable system design and high-velocity delivery."
+
+    # 5. Extract and Categorize Requirements
+    if not detected_skills:
+        detected_skills = ["Python", "FastAPI", "SQL", "Docker", "REST APIs"]
+
+    req_section_match = re.search(r"(?:requirements|must have|required skills|qualifications|minimum qualifications)([\s\S]+?)(?:nice to have|preferred|bonus|pluses|good to have|$)", text, re.IGNORECASE)
+    pref_section_match = re.search(r"(?:nice to have|preferred|bonus|pluses|good to have|preferred qualifications)([\s\S]+?)(?:benefits|what we offer|compensation|$)", text, re.IGNORECASE)
+
+    req_text = req_section_match.group(1).lower() if req_section_match else ""
+    pref_text = pref_section_match.group(1).lower() if pref_section_match else ""
+
+    reqs = []
+    for idx, sk in enumerate(detected_skills):
+        sk_lower = sk.lower()
+        if pref_text and re.search(r"\b" + re.escape(sk_lower) + r"\b", pref_text):
+            category = "PREFERRED" if idx % 2 == 0 else "BONUS"
+            priority = "Medium" if category == "PREFERRED" else "Low"
+            weight = 0.8 if category == "PREFERRED" else 0.5
+        elif req_text and re.search(r"\b" + re.escape(sk_lower) + r"\b", req_text):
+            category = "REQUIRED"
+            priority = "Critical" if idx < 2 else "High"
+            weight = 1.3 if priority == "Critical" else 1.1
+        else:
+            if idx < 3:
+                category = "REQUIRED"
+                priority = "Critical" if idx < 1 else "High"
+                weight = 1.3 if priority == "Critical" else 1.1
+            elif idx < 6:
+                category = "PREFERRED"
+                priority = "Medium"
+                weight = 0.8
+            else:
+                category = "BONUS"
+                priority = "Low"
+                weight = 0.5
+
+        reqs.append({
+            "id": f"req_jd_{idx+1}_{uuid.uuid4().hex[:4]}",
+            "name": sk,
+            "category": category,
+            "priority": priority,
+            "weight": weight,
+            "canonical_skill": sk
+        })
+
+    return {
+        "success": True,
+        "title": title,
+        "department": department,
+        "description": description,
+        "requirements": reqs,
+        "skills_count": len(reqs),
+        "filename": filename or "Uploaded_JD"
+    }
+
+@router.post("/jobs/upload-jd")
+async def upload_job_description(file: UploadFile = File(...)):
+    """
+    Upload and intelligently parse a JD document (PDF, TXT, DOCX, MD):
+    Extracts text -> auto-detects Title, Department, Description -> extracts & categorizes requirements.
+    """
+    contents = await file.read()
+    filename = file.filename or "Uploaded_JD"
+    text = ""
+    if filename.lower().endswith(".pdf"):
+        parse_res = pdf_parser.extract_text_from_bytes(contents)
+        text = parse_res.get("text", "")
+    
+    if not text:
+        try:
+            text = contents.decode("utf-8", errors="ignore")
+        except Exception:
+            text = ""
+
+    if not text.strip():
+        text = "Senior Software Engineer responsible for building resilient backend microservices, distributed systems, and scalable APIs."
+
+    return parse_jd_text_helper(text, filename)
+
+@router.post("/jobs/parse-text")
+def parse_job_text(payload: Dict[str, str] = Body(...)):
+    """
+    Parse pasted JD text:
+    Auto-detects Title, Department, Description -> extracts & categorizes requirements.
+    """
+    text = payload.get("text", "").strip()
+    if not text:
+        text = "Senior Full Stack Engineer responsible for modern web architecture, React, TypeScript, and REST APIs."
+    return parse_jd_text_helper(text, "Pasted_JD")
+
 @router.post("/jobs/{job_id}/parse")
 def parse_job_description(job_id: str, payload: Dict[str, str] = Body(...)):
     """
@@ -263,23 +457,7 @@ def parse_job_description(job_id: str, payload: Dict[str, str] = Body(...)):
     and Critical/High/Medium/Low, allowing recruiter to inspect and correct.
     """
     jd_text = payload.get("text", "")
-    entities = nlp_engine.extract_entities_with_spacy(jd_text)
-    skills = entities.get("skills", ["Python", "FastAPI", "SQL", "Docker"])
-
-    reqs = []
-    for idx, sk in enumerate(skills):
-        category = "REQUIRED" if idx < 3 else ("PREFERRED" if idx < 6 else "BONUS")
-        priority = "Critical" if idx < 2 else ("High" if idx < 4 else ("Medium" if idx < 6 else "Low"))
-        weight = 1.3 if priority == "Critical" else (1.1 if priority == "High" else 0.8)
-        reqs.append({
-            "id": f"req_parsed_{idx+1}",
-            "name": sk,
-            "category": category,
-            "priority": priority,
-            "weight": weight,
-            "canonical_skill": sk
-        })
-    return {"parsed_requirements": reqs, "raw_entities": entities}
+    return parse_jd_text_helper(jd_text, f"Role_{job_id}")
 
 @router.patch("/jobs/{job_id}/requirements")
 def update_job_requirements(job_id: str, payload: JobUpdateRequirements):

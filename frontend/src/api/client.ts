@@ -80,6 +80,25 @@ export const api = {
     return res.json();
   },
 
+  uploadJD: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/jobs/upload-jd`, {
+      method: 'POST',
+      body: formData,
+    });
+    return res.json();
+  },
+
+  parseJDText: async (text: string) => {
+    const res = await fetch(`${API_BASE}/jobs/parse-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    return res.json();
+  },
+
   createJob: async (jobData: {
     title: string;
     department: string;

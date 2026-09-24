@@ -18,6 +18,7 @@ import {
   Trash2,
   Check,
   Flame,
+  UploadCloud,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -37,6 +38,7 @@ interface RecruiterDashboardProps {
   onNavigateTab: (tab: string) => void;
   onStartDemoTour: () => void;
   onOpenJDEditor?: () => void;
+  onOpenUploadJD?: () => void;
   currentRoleTitle?: string;
   onRemoveCandidate?: (candidateId: string, candidateName: string) => void;
 }
@@ -48,6 +50,7 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
   onNavigateTab,
   onStartDemoTour,
   onOpenJDEditor,
+  onOpenUploadJD,
   currentRoleTitle = 'Senior Backend Engineer',
   onRemoveCandidate,
 }) => {
@@ -163,6 +166,16 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
+            {onOpenUploadJD && (
+              <button
+                onClick={onOpenUploadJD}
+                className="px-3.5 py-2.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 shadow-sm"
+                title="Upload or create a Job Description role"
+              >
+                <UploadCloud className="w-4 h-4 text-cyan-400" />
+                <span>Upload JD</span>
+              </button>
+            )}
             {onOpenJDEditor && (
               <button
                 onClick={onOpenJDEditor}

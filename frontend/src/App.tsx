@@ -75,8 +75,14 @@ export function App() {
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [isJDEditorOpen, setIsJDEditorOpen] = useState<boolean>(false);
   const [isManualAddJDOpen, setIsManualAddJDOpen] = useState<boolean>(false);
+  const [manualAddJDMode, setManualAddJDMode] = useState<'upload' | 'manual'>('upload');
   const [isDemoTourOpen, setIsDemoTourOpen] = useState<boolean>(false);
   const [simulatorCandidateId, setSimulatorCandidateId] = useState<string>('cand_elena');
+
+  const handleOpenManualAddJD = (mode: 'upload' | 'manual' = 'upload') => {
+    setManualAddJDMode(mode);
+    setIsManualAddJDOpen(true);
+  };
 
   useEffect(() => {
     loadInitialData();
@@ -293,7 +299,7 @@ export function App() {
         onSelectRole={handleSelectRole}
         currentUser={currentUser}
         onLogout={handleLogout}
-        onOpenManualAddJD={() => setIsManualAddJDOpen(true)}
+        onOpenManualAddJD={handleOpenManualAddJD}
         onResetDemoData={handleResetDemoData}
       />
 
@@ -307,6 +313,7 @@ export function App() {
             onNavigateTab={setActiveTab}
             onStartDemoTour={() => setIsDemoTourOpen(true)}
             onOpenJDEditor={() => setIsJDEditorOpen(true)}
+            onOpenUploadJD={() => handleOpenManualAddJD('upload')}
             currentRoleTitle={availableRoles.find((r) => r.id === currentRoleId)?.title || 'Senior Backend Engineer'}
             onRemoveCandidate={handleRemoveCandidate}
           />
@@ -400,6 +407,7 @@ export function App() {
       {/* Manual Add Custom JD Modal */}
       {isManualAddJDOpen && (
         <ManualAddJDModal
+          initialMode={manualAddJDMode}
           onClose={() => setIsManualAddJDOpen(false)}
           onRoleCreated={handleRoleCreated}
         />

@@ -30,7 +30,7 @@ interface HeaderProps {
   onSelectRole: (roleId: string) => void;
   currentUser: User | null;
   onLogout: () => void;
-  onOpenManualAddJD: () => void;
+  onOpenManualAddJD: (mode?: 'upload' | 'manual') => void;
   onResetDemoData?: () => void;
 }
 
@@ -179,31 +179,42 @@ export const Header: React.FC<HeaderProps> = ({
                     ))}
                   </div>
 
-                  {/* Manual Add JD Role Action inside Dropdown */}
-                  <div className="pt-2 border-t border-white/10 mt-1">
+                  {/* Active JD Role Actions inside Dropdown */}
+                  <div className="pt-2 border-t border-white/10 mt-1 space-y-1.5">
                     <button
                       onClick={() => {
                         setRoleDropdownOpen(false);
-                        onOpenManualAddJD();
+                        onOpenManualAddJD('upload');
                       }}
-                      className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-cyan-600/30 to-blue-600/30 hover:from-cyan-600/50 hover:to-blue-600/50 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition cursor-pointer flex items-center justify-center space-x-1.5 shadow-sm"
+                      className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-blue-600/40 via-cyan-600/40 to-blue-600/40 hover:from-blue-600/60 hover:to-cyan-600/60 text-cyan-200 border border-cyan-400/50 text-xs font-bold transition cursor-pointer flex items-center justify-center space-x-2 shadow-md shadow-cyan-500/20"
+                    >
+                      <UploadCloud className="w-3.5 h-3.5 text-cyan-300" />
+                      <span>Upload JD File (Auto-Extract via NLP)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setRoleDropdownOpen(false);
+                        onOpenManualAddJD('manual');
+                      }}
+                      className="w-full py-1.5 px-3 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 text-xs font-medium transition cursor-pointer flex items-center justify-center space-x-1.5"
                     >
                       <Plus className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>+ Add Manual JD (Any Career Category)</span>
+                      <span>+ Build JD Manually (Career Tracks)</span>
                     </button>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Direct Quick Add JD button in header */}
+            {/* Direct Quick Upload JD button in header */}
             <button
-              onClick={onOpenManualAddJD}
-              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 text-xs font-semibold transition cursor-pointer"
-              title="Manually create and add a new Job Description role"
+              onClick={() => onOpenManualAddJD('upload')}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-400/40 text-xs font-semibold transition cursor-pointer shadow-sm"
+              title="Upload a Job Description file or paste JD text to auto-extract"
             >
-              <Plus className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Add JD</span>
+              <UploadCloud className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Upload JD</span>
             </button>
           </div>
         </div>
