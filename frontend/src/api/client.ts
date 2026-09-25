@@ -59,6 +59,7 @@ export const api = {
     removed_candidate_ids?: string[];
     custom_requirements?: JobRequirement[];
     scoring_weights?: ScoringWeights;
+    uploaded_candidates?: any[];
   }) => {
     const res = await fetch(`${API_BASE}/sync/state`, {
       method: 'POST',

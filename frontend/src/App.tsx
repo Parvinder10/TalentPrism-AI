@@ -104,6 +104,7 @@ export function App() {
           removed_candidate_ids: removedIds,
           custom_requirements: calibratedReqs || undefined,
           scoring_weights: weights || undefined,
+          uploaded_candidates: storage.getUploadedCandidates(),
         });
       } catch (syncErr) {
         console.warn('Backend state sync warning:', syncErr);
@@ -207,7 +208,11 @@ export function App() {
     storage.saveCachedCandidates(currentRoleId, filtered);
   };
 
-  const handleUploadSuccess = async () => {
+  const handleUploadSuccess = async (newUploads?: any) => {
+    if (newUploads) {
+      const list = Array.isArray(newUploads) ? newUploads : [newUploads];
+      storage.saveUploadedCandidates(list);
+    }
     const updatedCandidates = await api.getCandidates();
     const removedIds = storage.getRemovedCandidateIds();
     const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
@@ -369,6 +374,7 @@ export function App() {
       {selectedCandidateId && (
         <CandidateExplorerModal
           candidateId={selectedCandidateId}
+          initialCandidate={candidates.find((c) => c.id === selectedCandidateId)}
           initialTab={candidateInitialTab}
           onClose={() => setSelectedCandidateId(null)}
           onOpenSimulator={handleOpenSimulator}

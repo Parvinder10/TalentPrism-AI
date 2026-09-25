@@ -3,6 +3,7 @@ import {
   X,
   Sparkles,
   AlertTriangle,
+  AlertCircle,
   CheckCircle2,
   Share2,
   FileText,
@@ -42,6 +43,7 @@ import {
 
 interface CandidateExplorerModalProps {
   candidateId: string;
+  initialCandidate?: any;
   initialTab?: string;
   onClose: () => void;
   onOpenSimulator: (candidateId: string) => void;
@@ -49,32 +51,53 @@ interface CandidateExplorerModalProps {
 
 export const CandidateExplorerModal: React.FC<CandidateExplorerModalProps> = ({
   candidateId,
+  initialCandidate,
   initialTab = 'passport',
   onClose,
   onOpenSimulator,
 }) => {
   const [activeTab, setActiveTab] = useState<string>(initialTab === 'overview' ? 'passport' : initialTab);
-  const [candidate, setCandidate] = useState<any>(null);
-  const [skills, setSkills] = useState<CandidateSkillEval[]>([]);
-  const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
+  const [candidate, setCandidate] = useState<any>(() => initialCandidate || null);
+  const [skills, setSkills] = useState<CandidateSkillEval[]>(() => {
+    if (initialCandidate?.skill_evals) {
+      return Object.values(initialCandidate.skill_evals);
+    }
+    return [];
+  });
+  const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>(() => initialCandidate?.evidence_list || []);
   const [timeline, setTimeline] = useState<TimelineYearGroup[]>([]);
   const [passport, setPassport] = useState<CandidatePassport | null>(null);
   const [whyData, setWhyData] = useState<any>(null);
   const [whyNotData, setWhyNotData] = useState<any>(null);
   const [interviewPlan, setInterviewPlan] = useState<InterviewPlan | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(!initialCandidate);
+  const [error, setError] = useState<string | null>(null);
   const [skillFilter, setSkillFilter] = useState<'all' | 'required' | 'strong' | 'gaps'>('all');
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [decisionState, setDecisionState] = useState<'none' | 'fast_track' | 'screen' | 'reject'>('none');
 
   useEffect(() => {
+    if (initialCandidate) {
+      setCandidate(initialCandidate);
+      if (initialCandidate.skill_evals) {
+        setSkills(Object.values(initialCandidate.skill_evals));
+      }
+      if (initialCandidate.evidence_list) {
+        setEvidenceList(initialCandidate.evidence_list);
+      }
+    }
     loadAllCandidateData();
   }, [candidateId]);
 
   const loadAllCandidateData = async () => {
     try {
-      setLoading(true);
+      if (!candidate && !initialCandidate) {
+        setLoading(true);
+      }
+      setError(null);
+
+      // Fetch all candidate telemetry endpoints independently so one failure never blocks the passport
       const [
         candRes,
         skillsRes,
@@ -85,26 +108,44 @@ export const CandidateExplorerModal: React.FC<CandidateExplorerModalProps> = ({
         whyNotRes,
         interviewRes,
       ] = await Promise.all([
-        api.getCandidate(candidateId),
-        api.getCandidateSkills(candidateId),
-        api.getCandidateEvidence(candidateId),
-        api.getCandidateTimeline(candidateId),
-        api.getCandidatePassport(candidateId),
-        api.getWhyCandidate(candidateId),
-        api.getWhyNotHigher(candidateId),
-        api.createInterviewPlan(candidateId),
+        api.getCandidate(candidateId).catch(() => initialCandidate || null),
+        api.getCandidateSkills(candidateId).catch(() => []),
+        api.getCandidateEvidence(candidateId).catch(() => []),
+        api.getCandidateTimeline(candidateId).catch(() => []),
+        api.getCandidatePassport(candidateId).catch(() => null),
+        api.getWhyCandidate(candidateId).catch(() => null),
+        api.getWhyNotHigher(candidateId).catch(() => null),
+        api.createInterviewPlan(candidateId).catch(() => null),
       ]);
 
-      setCandidate(candRes);
-      setSkills(skillsRes || []);
-      setEvidenceList(evRes || []);
-      setTimeline(tlRes || []);
+      const resolvedCand = candRes || initialCandidate || candidate;
+      setCandidate(resolvedCand);
+
+      if (skillsRes && skillsRes.length > 0) {
+        setSkills(skillsRes);
+      } else if (resolvedCand?.skill_evals) {
+        setSkills(Object.values(resolvedCand.skill_evals));
+      }
+
+      if (evRes && evRes.length > 0) {
+        setEvidenceList(evRes);
+      } else if (resolvedCand?.evidence_list) {
+        setEvidenceList(resolvedCand.evidence_list);
+      }
+
+      if (tlRes && tlRes.length > 0) {
+        setTimeline(tlRes);
+      }
+
       setPassport(passRes);
       setWhyData(whyRes);
       setWhyNotData(whyNotRes);
       setInterviewPlan(interviewRes);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error loading candidate passport:', e);
+      if (!candidate && !initialCandidate) {
+        setError(e.message || 'Failed to load candidate passport telemetry.');
+      }
     } finally {
       setLoading(false);
     }
@@ -178,14 +219,53 @@ export const CandidateExplorerModal: React.FC<CandidateExplorerModalProps> = ({
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
-  if (loading || !candidate) {
+  if (loading && !candidate) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xl">
-        <div className="flex flex-col items-center space-y-4 glass-panel p-8 rounded-3xl border border-cyan-500/40 glow-cyan">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xl">
+        <div className="relative flex flex-col items-center space-y-4 glass-panel p-8 rounded-3xl border border-cyan-500/40 glow-cyan max-w-sm w-full bg-[#070a12]">
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+            title="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
           <div className="w-12 h-12 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
           <div className="text-center space-y-1">
             <span className="text-sm font-bold text-white font-mono">TalentPrism Passport</span>
             <p className="text-xs text-slate-400">Rendering Multi-Axis Radar & Evidence Matrix...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!candidate) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xl">
+        <div className="glass-panel p-6 rounded-3xl border border-rose-500/40 glow-rose max-w-md w-full text-center space-y-4 bg-[#090d18]">
+          <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-white">Passport Profile Unavailable</h3>
+            <p className="text-xs text-slate-400 mt-1">
+              {error || 'Could not retrieve candidate data from server memory.'}
+            </p>
+          </div>
+          <div className="flex items-center justify-center space-x-3 pt-2">
+            <button
+              onClick={loadAllCandidateData}
+              className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs cursor-pointer transition"
+            >
+              Retry
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs cursor-pointer transition"
+            >
+              Close
+            </button>
           </div>
         </div>
       </div>

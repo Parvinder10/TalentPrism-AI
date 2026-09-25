@@ -145,6 +145,31 @@ export const storage = {
     }
   },
 
+  // --- Uploaded Resumes Candidates ---
+  getUploadedCandidates(): any[] {
+    try {
+      const data = localStorage.getItem(`${PREFIX}uploaded_candidates`);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  saveUploadedCandidates(cands: any[]): void {
+    try {
+      if (!cands || cands.length === 0) return;
+      const existing = storage.getUploadedCandidates();
+      const map = new Map<string, any>();
+      existing.forEach((c) => map.set(c.id, c));
+      cands.forEach((c) => {
+        if (c && c.id) map.set(c.id, c);
+      });
+      localStorage.setItem(`${PREFIX}uploaded_candidates`, JSON.stringify(Array.from(map.values())));
+    } catch (e) {
+      console.error('Failed to save uploaded candidates to localStorage', e);
+    }
+  },
+
   // --- Clear / Reset All Data ---
   resetAllState(): void {
     try {

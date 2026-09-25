@@ -45,6 +45,24 @@ OTHER_OPEN_ROLES = [
     }
 ]
 
+def _normalize_eval(item: Any) -> CandidateSkillEval:
+    if isinstance(item, CandidateSkillEval):
+        return item
+    if isinstance(item, dict):
+        return CandidateSkillEval(**item)
+    return CandidateSkillEval(
+        skill_name=str(getattr(item, "skill_name", "Skill")),
+        category=str(getattr(item, "category", "REQUIRED")),
+        priority=str(getattr(item, "priority", "High")),
+        detection_status=str(getattr(item, "detection_status", "LIMITED EVIDENCE")),
+        evidence_strength=float(getattr(item, "evidence_strength", 50.0)),
+        evidence_gap=float(getattr(item, "evidence_gap", 50.0)),
+        is_semantic_match=bool(getattr(item, "is_semantic_match", False)),
+        supporting_evidence_count=int(getattr(item, "supporting_evidence_count", 1)),
+        why_explanation=list(getattr(item, "why_explanation", ["Telemetry verified"])),
+        primary_source=str(getattr(item, "primary_source", "Portfolio"))
+    )
+
 class TalentLensEngine:
     def __init__(self):
         pass
@@ -53,12 +71,13 @@ class TalentLensEngine:
         self,
         candidate_id: str,
         candidate_name: str,
-        skill_evals: Dict[str, CandidateSkillEval],
+        skill_evals: Dict[str, Any],
         current_rank: int
     ) -> TalentLensInsight:
         """
         Analyze whether an aggregate score hides exceptional candidate strengths.
         """
+        skill_evals = {k: _normalize_eval(v) for k, v in (skill_evals or {}).items()}
         pool_comparison = []
         suppressors = []
         strengths = []
@@ -117,18 +136,19 @@ class TalentLensEngine:
     def generate_why_this_candidate(
         self,
         candidate_name: str,
-        skill_evals: Dict[str, CandidateSkillEval],
+        skill_evals: Dict[str, Any],
         projects: List[Dict[str, Any]],
         years_exp: float,
         lens: TalentLensInsight
     ) -> Dict[str, Any]:
         """Evidence-linked positive factors."""
+        skill_evals = {k: _normalize_eval(v) for k, v in (skill_evals or {}).items()}
         strong_skills = [
             s for s, e in skill_evals.items()
             if e.evidence_strength >= 85.0
         ]
         distinctive_highlights = []
-        for s in lens.core_strengths:
+        for s in (lens.core_strengths if lens else []):
             distinctive_highlights.append(
                 f"{s['skill']} evidence ({int(s['candidate_score'])}%) outperforms applicant pool average ({int(s['pool_average'])}%) by +{int(s['difference'])}%"
             )
@@ -136,27 +156,28 @@ class TalentLensEngine:
         return {
             "title": f"Why Consider {candidate_name}?",
             "strong_evidence_skills": strong_skills,
-            "relevant_projects_count": len(projects),
-            "project_highlights": [p.get("title", "Project") for p in projects[:3]],
+            "relevant_projects_count": len(projects or []),
+            "project_highlights": [p.get("title", "Project") for p in (projects or [])[:3]],
             "years_of_experience": years_exp,
             "recent_backend_experience": True,
-            "distinctive_strengths": distinctiveHighlights if (distinctiveHighlights := distinctive_highlights) else [
+            "distinctive_strengths": distinctive_highlights if distinctive_highlights else [
                 "Demonstrated consistency across core requirements",
                 "Verified production work context"
             ],
-            "evidence_quote": f"Verified through {len(projects)} deep technical projects and historical career progression."
+            "evidence_quote": f"Verified through {len(projects or [])} deep technical projects and historical career progression."
         }
 
     def generate_why_not_higher(
         self,
         candidate_name: str,
         current_rank: int,
-        skill_evals: Dict[str, CandidateSkillEval],
+        skill_evals: Dict[str, Any],
         lens: TalentLensInsight
     ) -> Dict[str, Any]:
         """Evidence-linked reasons why candidate is not ranked higher."""
+        skill_evals = {k: _normalize_eval(v) for k, v in (skill_evals or {}).items()}
         uncertainties = []
-        for sup in lens.primary_suppressors:
+        for sup in (lens.primary_suppressors if lens else []):
             skill = sup["skill"]
             eval_item = skill_evals.get(skill)
             uncertainties.append({
@@ -201,11 +222,12 @@ class TalentLensEngine:
         self,
         candidate_id: str,
         candidate_name: str,
-        skill_evals: Dict[str, CandidateSkillEval]
+        skill_evals: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
         Evaluate candidate against other currently open company roles.
         """
+        skill_evals = {k: _normalize_eval(v) for k, v in (skill_evals or {}).items()}
         cross_role_matches = []
         for role in OTHER_OPEN_ROLES:
             role_skills = role["skills"]

@@ -30,7 +30,7 @@ class TeamMatchingEngine:
     def analyze_team_complement(
         self,
         candidate_name: str,
-        candidate_skills: Dict[str, CandidateSkillEval],
+        candidate_skills: Dict[str, Any],
         role_match_score: float
     ) -> TeamMatchAnalysis:
         """
@@ -42,8 +42,13 @@ class TeamMatchingEngine:
         remaining_gaps = []
 
         for skill, team_data in TEAM_CAPABILITIES.items():
-            cand_eval = candidate_skills.get(skill)
-            cand_score = cand_eval.evidence_strength if cand_eval else 0.0
+            cand_eval = (candidate_skills or {}).get(skill)
+            if isinstance(cand_eval, dict):
+                cand_score = float(cand_eval.get("evidence_strength", 0.0))
+            elif cand_eval:
+                cand_score = float(getattr(cand_eval, "evidence_strength", 0.0))
+            else:
+                cand_score = 0.0
 
             if cand_score >= 65.0:
                 if team_data["coverage"] <= 40.0:

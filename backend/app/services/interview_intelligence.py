@@ -1,6 +1,24 @@
 from typing import Dict, List, Any
 from app.models.schemas import InterviewPlan, InterviewQuestion, CandidateSkillEval
 
+def _normalize_eval(item: Any) -> CandidateSkillEval:
+    if isinstance(item, CandidateSkillEval):
+        return item
+    if isinstance(item, dict):
+        return CandidateSkillEval(**item)
+    return CandidateSkillEval(
+        skill_name=str(getattr(item, "skill_name", "Skill")),
+        category=str(getattr(item, "category", "REQUIRED")),
+        priority=str(getattr(item, "priority", "High")),
+        detection_status=str(getattr(item, "detection_status", "LIMITED EVIDENCE")),
+        evidence_strength=float(getattr(item, "evidence_strength", 50.0)),
+        evidence_gap=float(getattr(item, "evidence_gap", 50.0)),
+        is_semantic_match=bool(getattr(item, "is_semantic_match", False)),
+        supporting_evidence_count=int(getattr(item, "supporting_evidence_count", 1)),
+        why_explanation=list(getattr(item, "why_explanation", ["Telemetry verified"])),
+        primary_source=str(getattr(item, "primary_source", "Portfolio"))
+    )
+
 class InterviewIntelligenceEngine:
     def __init__(self):
         pass
@@ -10,7 +28,7 @@ class InterviewIntelligenceEngine:
         candidate_id: str,
         candidate_name: str,
         job_title: str,
-        skill_evals: Dict[str, CandidateSkillEval],
+        skill_evals: Dict[str, Any],
         projects: List[Dict[str, Any]],
         talent_lens_data: Any
     ) -> InterviewPlan:
@@ -18,6 +36,7 @@ class InterviewIntelligenceEngine:
         Generate evidence-aware interview questions targeting specific uncertainties
         while excluding well-evidenced core skills.
         """
+        skill_evals = {k: _normalize_eval(v) for k, v in (skill_evals or {}).items()}
         high_priority = []
         medium_priority = []
         low_priority = []
