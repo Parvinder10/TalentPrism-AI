@@ -1574,6 +1574,10 @@ def get_candidates():
         current_weights,
         previous_ranks=previous_ranks_cache
     )
+    for c in ranked:
+        if c.id in candidates_store:
+            candidates_store[c.id]["rank"] = c.rank
+            candidates_store[c.id]["overall_match"] = c.overall_match
     return ranked
 
 def get_candidate_safe(candidate_id: str) -> Dict[str, Any]:
@@ -1911,11 +1915,25 @@ def get_why_not_higher(candidate_id: str):
 def get_candidate_talent_lens(candidate_id: str):
     cand = get_candidate_safe(candidate_id)
 
+    # Compute dynamic pool averages for the active job
+    active_cands = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
+    dynamic_averages = {}
+    for r in current_job.get("requirements", []):
+        scores = []
+        for c in active_cands:
+            ev = (c.get("skill_evals") or {}).get(r.name)
+            if ev:
+                scores.append(getattr(ev, "evidence_strength", 50.0) if not isinstance(ev, dict) else ev.get("evidence_strength", 50.0))
+        if scores:
+            dynamic_averages[r.name] = round(sum(scores) / len(scores), 1)
+
     return talent_lens.analyze_candidate(
         candidate_id=cand["id"],
         candidate_name=cand["name"],
         skill_evals=cand.get("skill_evals", {}),
-        current_rank=cand.get("rank", 1)
+        current_rank=int(cand.get("rank", 1)),
+        overall_match=float(cand.get("overall_match", 75.0)),
+        dynamic_pool_averages=dynamic_averages
     )
 
 @router.get("/jobs/{job_id}/talent-rescue")
@@ -1928,12 +1946,24 @@ def get_talent_rescue(job_id: str):
     cross_role_candidates = []
 
     active_cands = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
+    dynamic_averages = {}
+    for r in current_job.get("requirements", []):
+        scores = []
+        for c in active_cands:
+            ev = (c.get("skill_evals") or {}).get(r.name)
+            if ev:
+                scores.append(getattr(ev, "evidence_strength", 50.0) if not isinstance(ev, dict) else ev.get("evidence_strength", 50.0))
+        if scores:
+            dynamic_averages[r.name] = round(sum(scores) / len(scores), 1)
+
     for cand in active_cands:
         lens = talent_lens.analyze_candidate(
             candidate_id=cand["id"],
             candidate_name=cand["name"],
             skill_evals=cand.get("skill_evals", {}),
-            current_rank=cand.get("rank", 1)
+            current_rank=int(cand.get("rank", 1)),
+            overall_match=float(cand.get("overall_match", 75.0)),
+            dynamic_pool_averages=dynamic_averages
         )
         if lens.is_suppressed:
             within_role_candidates.append({

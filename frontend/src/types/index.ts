@@ -145,6 +145,12 @@ export interface TalentLensInsight {
     is_outperforming: boolean;
     is_underperforming: boolean;
   }>;
+  estimated_score_penalty?: number;
+  potential_recovered_score?: number;
+  potential_recovered_rank?: number;
+  recruiter_strategy?: string;
+  interview_validation_focus?: string[];
+  profile_distribution_description?: string;
 }
 
 export interface TeamMatchAnalysis {

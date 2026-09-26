@@ -180,10 +180,15 @@ class ScoringEngine:
                     getattr(v, "evidence_strength", v) if not isinstance(v, dict) else v.get("evidence_strength", 50.0)
                     for v in skill_evals.values()
                 ]
-                high_count = sum(1 for s in scores if s >= 78.0)
+                high_thresh = 1 if len(scores) <= 3 or any(s >= 88.0 for s in scores) else 2
+                high_count = sum(1 for s in scores if s >= 75.0)
                 low_count = sum(1 for s in scores if s <= 55.0)
-                if high_count >= 2 and low_count >= 1 and current_rank >= 3:
+                if high_count >= high_thresh and low_count >= 1 and current_rank >= 3:
                     has_talent_lens = True
+            # Rank 1-2 top performers are leading the pool and cannot be rank suppressed
+            if current_rank <= 2:
+                has_talent_lens = False
+
             tl_badge = "Hidden Core Strength" if has_talent_lens else None
 
             ranked_item = RankedCandidate(

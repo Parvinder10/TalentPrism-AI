@@ -124,9 +124,15 @@ class TalentLensInsight(BaseModel):
     archetype: str # SPECIALIST_LIKE or BALANCED
     headline: str # e.g. "HIDDEN CORE STRENGTH DETECTED"
     summary: str
-    primary_suppressors: List[Dict[str, Any]] # e.g. [{"skill": "Docker", "score": 31, "pool_avg": 76}]
-    core_strengths: List[Dict[str, Any]] # e.g. [{"skill": "Python", "score": 94, "pool_avg": 68}]
-    pool_comparison: List[Dict[str, Any]] # Candidate vs Pool comparison per skill
+    primary_suppressors: List[Dict[str, Any]] = [] # e.g. [{"skill": "Docker", "score": 31, "pool_avg": 76}]
+    core_strengths: List[Dict[str, Any]] = [] # e.g. [{"skill": "Python", "score": 94, "pool_avg": 68}]
+    pool_comparison: List[Dict[str, Any]] = [] # Candidate vs Pool comparison per skill
+    estimated_score_penalty: float = 0.0
+    potential_recovered_score: float = 0.0
+    potential_recovered_rank: int = 1
+    recruiter_strategy: str = ""
+    interview_validation_focus: List[str] = []
+    profile_distribution_description: str = ""
 
 # Team Complement
 class TeamMatchAnalysis(BaseModel):
