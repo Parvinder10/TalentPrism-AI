@@ -11,6 +11,14 @@ const KEYS = {
   CANDIDATE_CACHE: `${PREFIX}candidate_cache_`,
 };
 
+export const PROTECTED_PRESET_IDS = new Set([
+  'job_backend_core',
+  'job_fullstack',
+  'job_data_eng',
+  'job_devops_infra',
+  'job_ml_eng',
+]);
+
 export const storage = {
   // --- Active Tab ---
   getActiveTab(defaultTab: string = 'dashboard'): string {
@@ -32,7 +40,9 @@ export const storage = {
   // --- Current Role ID ---
   getCurrentRoleId(defaultId: string = 'job_backend_core'): string {
     try {
-      return localStorage.getItem(KEYS.CURRENT_ROLE_ID) || defaultId;
+      const val = localStorage.getItem(KEYS.CURRENT_ROLE_ID);
+      if (val !== null) return val;
+      return defaultId;
     } catch {
       return defaultId;
     }
@@ -79,13 +89,18 @@ export const storage = {
   getDeletedRoleIds(): string[] {
     try {
       const data = localStorage.getItem(`${PREFIX}deleted_role_ids`);
-      return data ? JSON.parse(data) : [];
+      const parsed: string[] = data ? JSON.parse(data) : [];
+      // Protect preconfigured presets so they are never filtered out
+      return parsed.filter((id) => !PROTECTED_PRESET_IDS.has(id));
     } catch {
       return [];
     }
   },
 
   addDeletedRoleId(roleId: string): void {
+    if (PROTECTED_PRESET_IDS.has(roleId)) {
+      return; // Never mark preset roles as deleted
+    }
     try {
       const ids = new Set(storage.getDeletedRoleIds());
       ids.add(roleId);

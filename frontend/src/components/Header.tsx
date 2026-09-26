@@ -15,7 +15,8 @@ import {
   User as UserIcon,
   Plus,
   RotateCcw,
-  Trash2,
+  XCircle,
+  Unlink,
 } from 'lucide-react';
 import { JobRole, User } from '../types';
 
@@ -33,7 +34,7 @@ interface HeaderProps {
   onLogout: () => void;
   onOpenManualAddJD: (mode?: 'upload' | 'manual') => void;
   onResetDemoData?: () => void;
-  onDeleteRole?: (roleId: string) => void;
+  onDisconnectJD?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -50,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenManualAddJD,
   onResetDemoData,
-  onDeleteRole,
+  onDisconnectJD,
 }) => {
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
 
@@ -66,7 +67,8 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'audit_trail', label: 'Audit Trail', icon: FileText },
   ];
 
-  const currentRole = availableRoles.find((r) => r.id === currentRoleId) || availableRoles[0];
+  const isJDConnected = currentRoleId !== 'none' && Boolean(availableRoles.find((r) => r.id === currentRoleId));
+  const currentRole = isJDConnected ? availableRoles.find((r) => r.id === currentRoleId) : null;
 
   return (
     <header className="sticky top-0 z-40 bg-[#080c16]/95 backdrop-blur-md border-b border-white/10">
@@ -134,15 +136,25 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="relative">
               <button
                 onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
-                className="flex items-center space-x-2.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 hover:border-cyan-400/60 transition cursor-pointer text-xs"
+                className={`flex items-center space-x-2.5 px-3 py-1.5 rounded-xl border transition cursor-pointer text-xs ${
+                  isJDConnected
+                    ? 'bg-slate-900/90 hover:bg-slate-800 border-cyan-500/30 hover:border-cyan-400/60'
+                    : 'bg-slate-900/90 hover:bg-slate-800 border-amber-500/40 hover:border-amber-400/70'
+                }`}
               >
-                <Briefcase className="w-3.5 h-3.5 text-cyan-400" />
+                {isJDConnected ? (
+                  <Briefcase className="w-3.5 h-3.5 text-cyan-400" />
+                ) : (
+                  <Unlink className="w-3.5 h-3.5 text-amber-400" />
+                )}
                 <div className="flex flex-col text-left">
-                  <span className="text-[9px] uppercase font-bold tracking-wider text-cyan-400 font-mono">
-                    Active JD Role
+                  <span className={`text-[9px] uppercase font-bold tracking-wider font-mono ${
+                    isJDConnected ? 'text-cyan-400' : 'text-amber-400'
+                  }`}>
+                    {isJDConnected ? 'Active JD Role' : 'No JD Connected'}
                   </span>
                   <span className="text-white font-bold text-xs truncate max-w-[200px]">
-                    {currentRole?.title || 'Senior Backend Engineer'}
+                    {isJDConnected ? (currentRole?.title || 'Connected JD') : 'Disconnected (Raw Pool)'}
                   </span>
                 </div>
                 <ChevronDown
@@ -154,16 +166,53 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* Role Dropdown Menu */}
               {roleDropdownOpen && (
-                <div className="absolute top-full left-0 mt-2 w-84 rounded-2xl bg-slate-950 border border-cyan-500/40 shadow-2xl p-2 z-50 space-y-1">
-                  <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase font-bold text-slate-400 font-mono flex items-center justify-between">
-                    <span>Select Role JD</span>
-                    <span className="text-cyan-400">{availableRoles.length} Available</span>
+                <div className="absolute top-full left-0 mt-2 w-84 rounded-2xl bg-slate-950 border border-cyan-500/40 shadow-2xl p-2.5 z-50 space-y-2">
+                  
+                  {/* Option to Disconnect / Clear Active JD */}
+                  {isJDConnected ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDisconnectJD?.();
+                        setRoleDropdownOpen(false);
+                      }}
+                      className="w-full p-2.5 rounded-xl text-left transition cursor-pointer flex items-center justify-between group bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                      title="Clear active JD so no job criteria execute"
+                    >
+                      <div className="flex items-center space-x-2.5">
+                        <XCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold">Clear Active JD (Disconnect)</span>
+                          <span className="text-[10px] text-amber-300/80">No JD will execute • View raw talent pool</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
+                        Clear
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-center justify-between">
+                      <div className="flex items-center space-x-2.5">
+                        <XCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold">No JD Active (Disconnected)</span>
+                          <span className="text-[10px] text-amber-300/80">Evaluating baseline talent pool</span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold">
+                        Active
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="px-3 py-1 border-b border-white/10 text-[10px] uppercase font-bold text-slate-400 font-mono flex items-center justify-between">
+                    <span>Available Role Presets</span>
+                    <span className="text-cyan-400">{availableRoles.length} Presets</span>
                   </div>
 
-                  <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
+                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
                     {availableRoles.map((r) => {
-                      const isSelected = currentRoleId === r.id;
-                      const canDelete = availableRoles.length > 1;
+                      const isSelected = isJDConnected && currentRoleId === r.id;
                       return (
                         <div
                           key={r.id}
@@ -184,18 +233,10 @@ export const Header: React.FC<HeaderProps> = ({
                             </span>
                           </div>
 
-                          {onDeleteRole && canDelete && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteRole(r.id);
-                              }}
-                              className="p-1.5 rounded-lg opacity-60 hover:opacity-100 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 transition cursor-pointer shrink-0"
-                              title={`Remove "${r.title}" JD specification`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                          {isSelected && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-semibold shrink-0">
+                              Connected
+                            </span>
                           )}
                         </div>
                       );

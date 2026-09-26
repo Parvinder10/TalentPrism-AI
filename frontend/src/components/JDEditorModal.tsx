@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   Layers,
   Check,
+  XCircle,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { JobRequirement } from '../types';
@@ -20,6 +21,7 @@ interface JDEditorModalProps {
   currentRoleTitle?: string;
   onClose: () => void;
   onRequirementsUpdated: (newReqs: JobRequirement[]) => void;
+  onDisconnectJD?: () => void;
   onDeleteRole?: (roleId: string) => void;
 }
 
@@ -29,6 +31,7 @@ export const JDEditorModal: React.FC<JDEditorModalProps> = ({
   currentRoleTitle = 'Senior Backend Engineer',
   onClose,
   onRequirementsUpdated,
+  onDisconnectJD,
   onDeleteRole,
 }) => {
   const [requirements, setRequirements] = useState<JobRequirement[]>(
@@ -204,20 +207,18 @@ export const JDEditorModal: React.FC<JDEditorModalProps> = ({
             </p>
           </div>
           <div className="flex items-center space-x-2">
-            {onDeleteRole && (
+            {onDisconnectJD && currentRoleId && currentRoleId !== 'none' && (
               <button
                 type="button"
                 onClick={() => {
-                  if (currentRoleId) {
-                    onClose();
-                    onDeleteRole(currentRoleId);
-                  }
+                  onClose();
+                  onDisconnectJD();
                 }}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold transition cursor-pointer"
-                title={`Remove "${currentRoleTitle}" JD role specification`}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold transition cursor-pointer"
+                title="Disconnect this JD so no job criteria execute"
               >
-                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                <span className="hidden sm:inline">Remove This JD</span>
+                <XCircle className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Clear / Disconnect JD</span>
               </button>
             )}
             <button

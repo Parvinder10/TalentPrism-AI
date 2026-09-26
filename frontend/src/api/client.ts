@@ -81,6 +81,14 @@ export const api = {
     return handleResponse(res);
   },
 
+  disconnectJD: async () => {
+    const res = await fetch(`${API_BASE}/jobs/disconnect-jd`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return handleResponse(res);
+  },
+
   deleteRole: async (roleId: string) => {
     const res = await fetch(`${API_BASE}/jobs/roles/${roleId}`, {
       method: 'DELETE',

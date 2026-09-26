@@ -15,10 +15,13 @@ import {
   Award,
   ChevronRight,
   ExternalLink,
-  Trash2,
   Check,
   Flame,
   UploadCloud,
+  XCircle,
+  AlertCircle,
+  Unlink,
+  Trash2,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -41,6 +44,7 @@ interface RecruiterDashboardProps {
   onOpenUploadJD?: () => void;
   currentRoleTitle?: string;
   currentRoleId?: string;
+  onDisconnectJD?: () => void;
   onDeleteRole?: (roleId: string) => void;
   onRemoveCandidate?: (candidateId: string, candidateName: string) => void;
 }
@@ -55,6 +59,7 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
   onOpenUploadJD,
   currentRoleTitle = 'Senior Backend Engineer',
   currentRoleId,
+  onDisconnectJD,
   onDeleteRole,
   onRemoveCandidate,
 }) => {
@@ -156,7 +161,16 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
                 <span>Live Intelligence Radar</span>
               </span>
               <span className="text-xs text-slate-300 font-mono">
-                Active JD: <strong className="text-white bg-slate-900/90 px-2.5 py-0.5 rounded-lg border border-white/10">{currentRoleTitle}</strong>
+                Active JD:{' '}
+                {currentRoleId === 'none' ? (
+                  <strong className="text-amber-300 bg-amber-950/40 px-2.5 py-0.5 rounded-lg border border-amber-500/30">
+                    No Active JD (Disconnected)
+                  </strong>
+                ) : (
+                  <strong className="text-white bg-slate-900/90 px-2.5 py-0.5 rounded-lg border border-white/10">
+                    {currentRoleTitle}
+                  </strong>
+                )}
               </span>
             </div>
 
@@ -189,14 +203,14 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
                 <span>Calibrate JD</span>
               </button>
             )}
-            {onDeleteRole && currentRoleId && (
+            {onDisconnectJD && currentRoleId && currentRoleId !== 'none' && (
               <button
-                onClick={() => onDeleteRole(currentRoleId)}
-                className="px-3.5 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 shadow-sm"
-                title={`Remove "${currentRoleTitle}" JD role specification`}
+                onClick={onDisconnectJD}
+                className="px-3.5 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 shadow-sm"
+                title="Disconnect currently active JD so no job specifications execute"
               >
-                <Trash2 className="w-4 h-4 text-rose-400" />
-                <span>Remove JD</span>
+                <XCircle className="w-4 h-4 text-amber-400" />
+                <span>Clear JD</span>
               </button>
             )}
             <button
@@ -209,6 +223,33 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Disconnected JD Banner */}
+      {currentRoleId === 'none' && (
+        <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <XCircle className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="font-bold text-amber-200">
+                Job Description Disconnected (No Criteria Executing)
+              </p>
+              <p className="text-[11px] text-amber-300/80">
+                All candidates are currently displayed in their baseline talent pool. Select any preset role or upload a JD to execute criteria matching.
+              </p>
+            </div>
+          </div>
+          {onOpenUploadJD && (
+            <button
+              onClick={onOpenUploadJD}
+              className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-400/40 font-bold transition cursor-pointer shrink-0"
+            >
+              + Connect / Upload JD
+            </button>
+          )}
+        </div>
+      )}
 
       {/* --- TOP 4 VIBRANT METRIC GAUGES --- */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -393,45 +434,55 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
 
           {/* Requirement Coverage Bars */}
           <div className="space-y-2.5 overflow-y-auto max-h-[220px] pr-1">
-            {requirementPoolStats.map((stat) => (
-              <div key={stat.name} className="space-y-1 p-2 rounded-xl bg-slate-900/60 border border-white/5">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold text-white font-mono text-xs">{stat.name}</span>
-                    <span
-                      className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase font-mono ${
-                        stat.category === 'REQUIRED'
-                          ? 'bg-blue-500/20 text-cyan-300 border border-cyan-400/30'
-                          : 'bg-purple-500/20 text-purple-300 border border-purple-400/30'
-                      }`}
-                    >
-                      {stat.category}
+            {requirementPoolStats.length === 0 ? (
+              <div className="py-8 text-center space-y-2">
+                <Layers className="w-8 h-8 text-slate-600 mx-auto" />
+                <p className="text-xs text-slate-300 font-medium">No Active Job Description Criteria</p>
+                <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                  Connect a preset role or upload a JD to view verified candidate skill availability and supply heatmaps.
+                </p>
+              </div>
+            ) : (
+              requirementPoolStats.map((stat) => (
+                <div key={stat.name} className="space-y-1 p-2 rounded-xl bg-slate-900/60 border border-white/5">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-bold text-white font-mono text-xs">{stat.name}</span>
+                      <span
+                        className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase font-mono ${
+                          stat.category === 'REQUIRED'
+                            ? 'bg-blue-500/20 text-cyan-300 border border-cyan-400/30'
+                            : 'bg-purple-500/20 text-purple-300 border border-purple-400/30'
+                        }`}
+                      >
+                        {stat.category}
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-mono font-bold text-emerald-400">
+                      {stat.strongPct}% Strong
                     </span>
                   </div>
-                  <span className="text-[11px] font-mono font-bold text-emerald-400">
-                    {stat.strongPct}% Strong
-                  </span>
-                </div>
 
-                <div className="h-2 w-full rounded-full overflow-hidden flex bg-slate-950 border border-white/5">
-                  <div
-                    className="bg-emerald-400 h-full"
-                    style={{ width: `${stat.strongPct}%` }}
-                    title={`Strong Evidence: ${stat.strongPct}%`}
-                  ></div>
-                  <div
-                    className="bg-cyan-500 h-full"
-                    style={{ width: `${stat.moderatePct}%` }}
-                    title={`Moderate Evidence: ${stat.moderatePct}%`}
-                  ></div>
-                  <div
-                    className="bg-rose-500/70 h-full"
-                    style={{ width: `${stat.gapPct}%` }}
-                    title={`Uncertainty / Gap: ${stat.gapPct}%`}
-                  ></div>
+                  <div className="h-2 w-full rounded-full overflow-hidden flex bg-slate-950 border border-white/5">
+                    <div
+                      className="bg-emerald-400 h-full"
+                      style={{ width: `${stat.strongPct}%` }}
+                      title={`Strong Evidence: ${stat.strongPct}%`}
+                    ></div>
+                    <div
+                      className="bg-cyan-500 h-full"
+                      style={{ width: `${stat.moderatePct}%` }}
+                      title={`Moderate Evidence: ${stat.moderatePct}%`}
+                    ></div>
+                    <div
+                      className="bg-rose-500/70 h-full"
+                      style={{ width: `${stat.gapPct}%` }}
+                      title={`Uncertainty / Gap: ${stat.gapPct}%`}
+                    ></div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
 
           <div className="flex items-center justify-between text-[10px] text-slate-400 pt-2 border-t border-white/5 font-mono">

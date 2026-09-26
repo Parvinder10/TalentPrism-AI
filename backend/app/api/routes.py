@@ -329,15 +329,56 @@ def get_all_roles():
     """Returns the 5 pre-configured industry role specifications."""
     return list(PRECONFIGURED_ROLES.values())
 
+@router.post("/jobs/disconnect-jd")
+def disconnect_jd():
+    """
+    Clears / disconnects the currently executing Job Description.
+    No job requirements or filters will execute, showing candidates in baseline talent pool.
+    All preset roles remain intact and available in the role catalog.
+    """
+    global current_job
+    current_job = {
+        "id": "none",
+        "title": "No Active JD (Disconnected)",
+        "department": "None",
+        "description": "No job description is currently executing. All applicants displayed in general talent pool.",
+        "requirements": []
+    }
+    reevaluate_candidates_for_job([])
+    refresh_baseline_ranking()
+
+    ranked, _ = scoring_engine.rank_candidates(
+        list(candidates_store.values()),
+        [],
+        current_weights,
+        previous_ranks=previous_ranks_cache,
+        reason="Recruiter cleared active JD: executing neutral baseline pool"
+    )
+
+    for r in ranked:
+        if r.id in candidates_store:
+            candidates_store[r.id]["rank"] = r.rank
+            candidates_store[r.id]["overall_match"] = r.overall_match
+
+    return {
+        "success": True,
+        "active_job": current_job,
+        "ranked_candidates": ranked
+    }
+
 @router.post("/jobs/select-role")
 def select_job_role(payload: Dict[str, Any] = Body(...)):
     """
-    Select an active Job Role (e.g. Senior Backend Engineer, Full Stack, Data Engineer, etc.).
-    Immediately re-evaluates all candidate portfolios and recalculates live rankings!
+    Select an active Job Role (e.g. Senior Backend Engineer, Full Stack, Data Engineer, etc.),
+    or pass role_id="none" to clear / disconnect the active JD.
     """
     global current_job
     role_id = payload.get("role_id", "job_backend_core")
     role_data = payload.get("role_data")
+
+    # If recruiter cleared / disconnected the JD
+    if role_id in ("none", "null", ""):
+        return disconnect_jd()
 
     if role_data and isinstance(role_data, dict):
         PRECONFIGURED_ROLES[role_id] = role_data
@@ -361,19 +402,38 @@ def select_job_role(payload: Dict[str, Any] = Body(...)):
         reason=f"Recruiter selected role: {current_job['title']}"
     )
 
+    for r in ranked:
+        if r.id in candidates_store:
+            candidates_store[r.id]["rank"] = r.rank
+            candidates_store[r.id]["overall_match"] = r.overall_match
+
     return {
         "success": True,
         "active_job": current_job,
         "ranked_candidates": ranked
     }
 
+PROTECTED_PRESET_ROLES = {
+    "job_backend_core",
+    "job_fullstack",
+    "job_data_eng",
+    "job_devops_infra",
+    "job_ml_eng"
+}
+
 @router.delete("/jobs/roles/{role_id}")
 def delete_job_role(role_id: str):
     """
-    Deletes a Job Role specification from the catalog.
-    If the active job was the deleted role, automatically switches to another available role.
+    Deletes a custom Job Role specification.
+    Preconfigured preset roles are protected from deletion.
     """
     global current_job
+    if role_id in PROTECTED_PRESET_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail="Preconfigured industry roles are permanent and cannot be deleted. Use 'Clear JD' to disconnect."
+        )
+
     if len(PRECONFIGURED_ROLES) <= 1:
         raise HTTPException(status_code=400, detail="Cannot delete the only remaining Job Description role.")
 
@@ -401,10 +461,10 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
     """
     global current_job, candidates_store, current_weights
     
-    # 0. Remove any deleted roles from client
+    # 0. Remove any deleted custom roles from client (never delete protected preset roles)
     deleted_role_ids = payload.get("deleted_role_ids", [])
     for d_id in deleted_role_ids:
-        if d_id in PRECONFIGURED_ROLES and len(PRECONFIGURED_ROLES) > 1:
+        if d_id not in PROTECTED_PRESET_ROLES and d_id in PRECONFIGURED_ROLES and len(PRECONFIGURED_ROLES) > 1:
             PRECONFIGURED_ROLES.pop(d_id, None)
 
     # 1. Register any custom roles from client
@@ -416,18 +476,29 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
             
     # 2. Set active role if specified
     active_role_id = payload.get("active_role_id")
-    if active_role_id and active_role_id in PRECONFIGURED_ROLES:
+    if active_role_id in ("none", "null", ""):
+        current_job = {
+            "id": "none",
+            "title": "No Active JD (Disconnected)",
+            "department": "None",
+            "description": "No job description is currently executing. All applicants displayed in general talent pool.",
+            "requirements": []
+        }
+    elif active_role_id and active_role_id in PRECONFIGURED_ROLES:
         current_job = dict(PRECONFIGURED_ROLES[active_role_id])
     
-    # 3. Apply custom calibrated requirements if specified
-    custom_reqs = payload.get("custom_requirements")
-    if custom_reqs and isinstance(custom_reqs, list):
-        norm_custom_reqs = [normalize_requirement(r) for r in custom_reqs]
-        current_job["requirements"] = norm_custom_reqs
-        if active_role_id and active_role_id in PRECONFIGURED_ROLES:
-            PRECONFIGURED_ROLES[active_role_id]["requirements"] = norm_custom_reqs
+    # 3. Apply custom calibrated requirements if specified (only when active_role_id != 'none')
+    if active_role_id not in ("none", "null", ""):
+        custom_reqs = payload.get("custom_requirements")
+        if custom_reqs and isinstance(custom_reqs, list):
+            norm_custom_reqs = [normalize_requirement(r) for r in custom_reqs]
+            current_job["requirements"] = norm_custom_reqs
+            if active_role_id and active_role_id in PRECONFIGURED_ROLES:
+                PRECONFIGURED_ROLES[active_role_id]["requirements"] = norm_custom_reqs
+        else:
+            current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
     else:
-        current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
+        current_job["requirements"] = []
 
     # 4. Apply custom scoring weights if specified
     weights = payload.get("scoring_weights")
@@ -490,6 +561,14 @@ def reset_demo_data():
 
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str):
+    if job_id in ("none", "null"):
+        return {
+            "id": "none",
+            "title": "No Active JD (Disconnected)",
+            "department": "None",
+            "description": "No job description is currently executing. All applicants displayed in general talent pool.",
+            "requirements": []
+        }
     if job_id != "current" and job_id in PRECONFIGURED_ROLES:
         return PRECONFIGURED_ROLES[job_id]
     return current_job

@@ -113,9 +113,12 @@ export function App() {
       }
 
       // Fetch current candidates, job specs, and role catalog
+      const isDisconnected = storedRoleId === 'none';
       const [candData, jobData, rolesData] = await Promise.all([
         api.getCandidates(),
-        api.getJob(storedRoleId).catch(() => api.getJob('current')),
+        isDisconnected
+          ? Promise.resolve({ id: 'none', title: 'No Active JD (Disconnected)', requirements: [] })
+          : api.getJob(storedRoleId).catch(() => api.getJob('current')),
         api.getRoles(),
       ]);
 
@@ -130,9 +133,9 @@ export function App() {
       const mergedRoles = Array.from(mergedRolesMap.values());
       setAvailableRoles(mergedRoles);
 
-      // If storedRoleId was deleted, select the first available role
+      // If storedRoleId was deleted, select the first available role (unless 'none')
       let effectiveRoleId = storedRoleId;
-      if (deletedRoleIds.includes(effectiveRoleId) && mergedRoles.length > 0) {
+      if (effectiveRoleId !== 'none' && deletedRoleIds.includes(effectiveRoleId) && mergedRoles.length > 0) {
         effectiveRoleId = mergedRoles[0].id;
         storage.setCurrentRoleId(effectiveRoleId);
       }
@@ -142,8 +145,10 @@ export function App() {
       setCandidates(filteredCandidates);
       storage.saveCachedCandidates(effectiveRoleId, filteredCandidates);
 
-      // Priority for requirements: calibrated user edits > jobData from API
-      if (calibratedReqs && calibratedReqs.length > 0) {
+      // Priority for requirements: calibrated user edits > jobData from API (empty when 'none')
+      if (effectiveRoleId === 'none') {
+        setRequirements([]);
+      } else if (calibratedReqs && calibratedReqs.length > 0) {
         setRequirements(calibratedReqs);
       } else if (jobData?.requirements) {
         setRequirements(jobData.requirements);
@@ -167,10 +172,39 @@ export function App() {
     localStorage.removeItem('talentprism_user');
   };
 
+  const handleDisconnectJD = async () => {
+    try {
+      setLoading(true);
+      setCurrentRoleId('none');
+      storage.setCurrentRoleId('none');
+      setRequirements([]);
+
+      const res = await api.disconnectJD();
+      const removedIds = storage.getRemovedCandidateIds();
+      let newCandidates: RankedCandidate[] = [];
+      if (res.ranked_candidates) {
+        newCandidates = res.ranked_candidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
+      } else {
+        const fresh = await api.getCandidates();
+        newCandidates = fresh.filter((c: RankedCandidate) => !removedIds.includes(c.id));
+      }
+      setCandidates(newCandidates);
+      storage.saveCachedCandidates('none', newCandidates);
+    } catch (err) {
+      console.error('Failed to disconnect JD:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSelectRole = async (roleId: string) => {
+    if (roleId === 'none') {
+      return handleDisconnectJD();
+    }
     try {
       setLoading(true);
       setCurrentRoleId(roleId);
+      storage.setCurrentRoleId(roleId);
 
       const targetRole = availableRoles.find((r) => r.id === roleId);
       const removedIds = storage.getRemovedCandidateIds();
@@ -378,7 +412,7 @@ export function App() {
         onLogout={handleLogout}
         onOpenManualAddJD={handleOpenManualAddJD}
         onResetDemoData={handleResetDemoData}
-        onDeleteRole={handleDeleteRole}
+        onDisconnectJD={handleDisconnectJD}
       />
 
       {/* Main Container */}
@@ -392,9 +426,13 @@ export function App() {
             onStartDemoTour={() => setIsDemoTourOpen(true)}
             onOpenJDEditor={() => setIsJDEditorOpen(true)}
             onOpenUploadJD={() => handleOpenManualAddJD('upload')}
-            currentRoleTitle={availableRoles.find((r) => r.id === currentRoleId)?.title || 'Senior Backend Engineer'}
+            currentRoleTitle={
+              currentRoleId === 'none'
+                ? 'No Active JD (Disconnected)'
+                : (availableRoles.find((r) => r.id === currentRoleId)?.title || 'No JD Connected')
+            }
             currentRoleId={currentRoleId}
-            onDeleteRole={handleDeleteRole}
+            onDisconnectJD={handleDisconnectJD}
             onRemoveCandidate={handleRemoveCandidate}
           />
         )}
@@ -469,10 +507,14 @@ export function App() {
         <JDEditorModal
           currentRequirements={requirements}
           currentRoleId={currentRoleId}
-          currentRoleTitle={availableRoles.find((r) => r.id === currentRoleId)?.title || 'Senior Backend Engineer'}
+          currentRoleTitle={
+            currentRoleId === 'none'
+              ? 'No Active JD (Disconnected)'
+              : (availableRoles.find((r) => r.id === currentRoleId)?.title || 'No JD Connected')
+          }
           onClose={() => setIsJDEditorOpen(false)}
           onRequirementsUpdated={handleRequirementsUpdated}
-          onDeleteRole={handleDeleteRole}
+          onDisconnectJD={handleDisconnectJD}
         />
       )}
 

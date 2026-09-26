@@ -93,6 +93,7 @@ export const EvidenceMatrixView: React.FC<EvidenceMatrixProps> = ({ onSelectCand
 
   // Recruiter decisive metrics at top
   const eliteCandidates = filteredRows.filter((r: any) => {
+    if (!columns?.required || columns.required.length === 0) return false;
     return columns.required.every((req: string) => (r.required_scores[req] || 0) >= 85);
   });
 
