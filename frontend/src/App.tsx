@@ -272,24 +272,30 @@ export function App() {
     storage.saveCachedCandidates(currentRoleId, filtered);
   };
 
-  const handleRoleCreated = (newRole: JobRole, updatedCandidates?: RankedCandidate[]) => {
+  const handleRoleCreated = (
+    newRole: JobRole,
+    updatedCandidates?: RankedCandidate[],
+    activate: boolean = true
+  ) => {
     storage.saveCustomRole(newRole);
     storage.saveCalibratedRequirements(newRole.id, newRole.requirements || []);
-    storage.setCurrentRoleId(newRole.id);
 
     setAvailableRoles((prev) => {
       const exists = prev.some((r) => r.id === newRole.id);
       return exists ? prev.map((r) => (r.id === newRole.id ? newRole : r)) : [...prev, newRole];
     });
 
-    setCurrentRoleId(newRole.id);
-    setRequirements(newRole.requirements || []);
+    if (activate) {
+      storage.setCurrentRoleId(newRole.id);
+      setCurrentRoleId(newRole.id);
+      setRequirements(newRole.requirements || []);
 
-    if (updatedCandidates) {
-      const removedIds = storage.getRemovedCandidateIds();
-      const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
-      setCandidates(filtered);
-      storage.saveCachedCandidates(newRole.id, filtered);
+      if (updatedCandidates) {
+        const removedIds = storage.getRemovedCandidateIds();
+        const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
+        setCandidates(filtered);
+        storage.saveCachedCandidates(newRole.id, filtered);
+      }
     }
   };
 
