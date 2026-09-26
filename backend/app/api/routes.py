@@ -1,5 +1,6 @@
 import uuid
 import re
+import hashlib
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body
 from app.models.schemas import (
@@ -94,24 +95,104 @@ def refresh_baseline_ranking():
 refresh_baseline_ranking()
 
 # --- AUTH / HEALTH ---
+AUTHORIZED_USERS: Dict[str, Dict[str, Any]] = {
+    "recruiter@talentprism.ai": {
+        "password": "PrismRecruiter@2025",
+        "name": "Sarah Recruiter",
+        "role": "Lead Talent Partner",
+        "organization": "Prism Technologies Inc.",
+        "badge": "Lead Talent Partner",
+        "avatar": "SR",
+        "department": "Global Talent Acquisition"
+    },
+    "vishesh@talentprism.ai": {
+        "password": "Vishesh@TalentPrism",
+        "name": "Vishesh Rajput",
+        "role": "Head of Talent Acquisition & AI Strategy",
+        "organization": "TalentPrism Global Labs",
+        "badge": "Platform Administrator",
+        "avatar": "VR",
+        "department": "Executive Leadership"
+    },
+    "hiring.manager@talentprism.ai": {
+        "password": "HiringManager@2025",
+        "name": "Alex Chen",
+        "role": "VP of Engineering & Hiring Manager",
+        "organization": "Prism Cloud Infrastructure",
+        "badge": "Hiring Manager",
+        "avatar": "AC",
+        "department": "Core Engineering"
+    },
+    "demo@talentprism.ai": {
+        "password": "TalentPrism@Demo",
+        "name": "Enterprise Demo Partner",
+        "role": "Strategic Talent Lead",
+        "organization": "Prism Enterprise Sandbox",
+        "badge": "Sandbox Evaluator",
+        "avatar": "TP",
+        "department": "Evaluation & Demo Sandbox"
+    }
+}
+
 @router.get("/health")
 def health():
     return {"status": "healthy", "service": "TalentPrism AI", "version": "2.4.0"}
 
 @router.post("/auth/login")
-def login(payload: Dict[str, str] = Body(...)):
-    email = payload.get("email", "recruiter@talentprism.ai")
-    role = payload.get("role", "Lead Talent Partner")
+def login(payload: Dict[str, Any] = Body(...)):
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", "")).strip()
+
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Corporate email address is required to access TalentPrism AI."
+        )
+    if not password:
+        raise HTTPException(
+            status_code=400,
+            detail="Password is required. Please enter your corporate credentials or select an authorized enterprise demo profile."
+        )
+
+    user_record = AUTHORIZED_USERS.get(email)
+    if not user_record or user_record["password"] != password:
+        raise HTTPException(
+            status_code=401,
+            detail="Access Denied: Invalid corporate email or password. Only authorized TalentPrism enterprise accounts are permitted to sign in."
+        )
+
+    # Deterministic enterprise session token
+    session_token = f"prism_token_{hashlib.sha256(f'{email}:{password}:talentprism_salt'.encode()).hexdigest()[:24]}"
+
     return {
-        "access_token": "prism_jwt_token_sample",
+        "access_token": session_token,
         "token_type": "bearer",
         "user": {
-            "name": "Sarah Recruiter",
+            "name": user_record["name"],
             "email": email,
-            "role": role,
-            "organization": "Prism Technologies Inc."
+            "role": user_record["role"],
+            "organization": user_record["organization"],
+            "badge": user_record.get("badge", "Enterprise Partner"),
+            "avatar": user_record.get("avatar", "TP"),
+            "department": user_record.get("department", "Talent Acquisition")
         }
     }
+
+@router.get("/auth/authorized-accounts")
+def get_authorized_accounts():
+    """Returns the list of authorized enterprise corporate profiles for quick demo selection."""
+    return [
+        {
+            "email": email,
+            "name": u["name"],
+            "role": u["role"],
+            "organization": u["organization"],
+            "badge": u["badge"],
+            "department": u["department"],
+            "password": u["password"]
+        }
+        for email, u in AUTHORIZED_USERS.items()
+    ]
 
 # --- JOBS ---
 @router.get("/jobs")

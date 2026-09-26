@@ -3,6 +3,9 @@ export interface User {
   email: string;
   role: string;
   organization: string;
+  badge?: string;
+  avatar?: string;
+  department?: string;
 }
 
 export interface JobRequirement {

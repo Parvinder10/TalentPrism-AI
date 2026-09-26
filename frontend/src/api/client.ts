@@ -38,6 +38,11 @@ export const api = {
     return handleResponse(res);
   },
 
+  getAuthorizedAccounts: async () => {
+    const res = await fetch(`${API_BASE}/auth/authorized-accounts`);
+    return handleResponse(res);
+  },
+
   // Jobs & Roles
   getRoles: async (): Promise<JobRole[]> => {
     const res = await fetch(`${API_BASE}/jobs/roles`);
