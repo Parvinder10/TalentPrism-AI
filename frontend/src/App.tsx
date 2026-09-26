@@ -17,7 +17,13 @@ import { DemoTourModal } from './components/DemoTourModal';
 import { ManualAddJDModal } from './components/ManualAddJDModal';
 import { api } from './api/client';
 import { RankedCandidate, JobRequirement, JobRole, User } from './types';
-import { storage, PROTECTED_PRESET_IDS } from './utils/storage';
+import {
+  storage,
+  PROTECTED_PRESET_IDS,
+  DEFAULT_PRESET_ROLES,
+  broadcastTabSync,
+  subscribeTabSync,
+} from './utils/storage';
 
 export function App() {
   // Authentication State - default to null so login page is always the very first page
@@ -55,11 +61,15 @@ export function App() {
 
   const [requirements, setRequirements] = useState<JobRequirement[]>(() => {
     const roleId = storage.getCurrentRoleId('job_backend_core');
-    return storage.getCalibratedRequirements(roleId) || [];
+    if (roleId === 'none') return [];
+    const calibrated = storage.getCalibratedRequirements(roleId);
+    if (calibrated && calibrated.length > 0) return calibrated;
+    const preset = DEFAULT_PRESET_ROLES.find((r) => r.id === roleId);
+    return preset?.requirements || [];
   });
 
   const [availableRoles, setAvailableRoles] = useState<JobRole[]>(() => {
-    return storage.getCustomRoles();
+    return storage.getAllAvailableRoles();
   });
 
   // If cached candidates exist, do not block with full page spinner!
@@ -86,11 +96,87 @@ export function App() {
 
   useEffect(() => {
     loadInitialData();
+
+    // 1. Instant cross-tab real-time sync via BroadcastChannel & storage events
+    const unsubscribe = subscribeTabSync((msg) => {
+      if (!msg || !msg.type) return;
+      switch (msg.type) {
+        case 'ROLE_CHANGED':
+          if (msg.payload?.roleId !== undefined) {
+            setCurrentRoleIdState(msg.payload.roleId);
+            if (msg.payload.requirements) setRequirements(msg.payload.requirements);
+            if (msg.payload.candidates) setCandidates(msg.payload.candidates);
+          }
+          break;
+        case 'ROLE_CREATED':
+          if (msg.payload?.role) {
+            setAvailableRoles((prev) => {
+              const map = new Map<string, JobRole>();
+              prev.forEach((r) => map.set(r.id, r));
+              map.set(msg.payload.role.id, msg.payload.role);
+              return Array.from(map.values());
+            });
+            if (msg.payload.active) {
+              setCurrentRoleIdState(msg.payload.role.id);
+              if (msg.payload.role.requirements) setRequirements(msg.payload.role.requirements);
+              if (msg.payload.candidates) setCandidates(msg.payload.candidates);
+            }
+          }
+          break;
+        case 'ROLE_DELETED':
+          if (msg.payload?.roleId) {
+            setAvailableRoles((prev) => prev.filter((r) => r.id !== msg.payload.roleId));
+            if (msg.payload.nextRoleId) {
+              setCurrentRoleIdState(msg.payload.nextRoleId);
+            }
+          }
+          break;
+        case 'CANDIDATE_REMOVED':
+          if (msg.payload?.candidateId) {
+            setCandidates((prev) => prev.filter((c) => c.id !== msg.payload.candidateId));
+          }
+          break;
+        case 'AUTH_CHANGED':
+          setCurrentUser(msg.payload?.user || null);
+          break;
+        case 'CANDIDATE_ADDED':
+        case 'STORAGE_CHANGE':
+        case 'FULL_SYNC':
+          loadInitialData(true);
+          break;
+      }
+    });
+
+    // 2. Cross-browser focus sync (e.g. switching between Chrome & Edge)
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        loadInitialData(true);
+      }
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+
+    // 3. Periodic background sync every 12s for side-by-side browser windows
+    const intervalTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadInitialData(true);
+      }
+    }, 12000);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      clearInterval(intervalTimer);
+    };
   }, []);
 
-  const loadInitialData = async () => {
+  const loadInitialData = async (silent: boolean = false) => {
     try {
-      const storedRoleId = storage.getCurrentRoleId('job_backend_core');
+      if (!silent && candidates.length === 0) {
+        setLoading(true);
+      }
+      let storedRoleId = storage.getCurrentRoleId('job_backend_core');
       const customRoles = storage.getCustomRoles();
       const deletedRoleIds = storage.getDeletedRoleIds();
       const removedIds = storage.getRemovedCandidateIds();
@@ -98,8 +184,9 @@ export function App() {
       const weights = storage.getScoringWeights();
 
       // Synchronize browser persistent state with the backend Python worker
+      let syncRes: any = null;
       try {
-        await api.syncState({
+        syncRes = await api.syncState({
           custom_roles: customRoles,
           deleted_role_ids: deletedRoleIds,
           active_role_id: storedRoleId,
@@ -107,9 +194,27 @@ export function App() {
           custom_requirements: calibratedReqs || undefined,
           scoring_weights: weights || undefined,
           uploaded_candidates: storage.getUploadedCandidates(),
+          is_initial_load: true,
         });
       } catch (syncErr) {
         console.warn('Backend state sync warning:', syncErr);
+      }
+
+      if (syncRes) {
+        if (syncRes.custom_roles && Array.isArray(syncRes.custom_roles) && syncRes.custom_roles.length > 0) {
+          storage.saveCustomRoles(syncRes.custom_roles);
+        }
+        if (syncRes.uploaded_candidates && Array.isArray(syncRes.uploaded_candidates) && syncRes.uploaded_candidates.length > 0) {
+          storage.saveUploadedCandidates(syncRes.uploaded_candidates);
+        }
+        // Adopt server active_role_id if local was default or not explicitly set
+        const explicitLocalRoleId = localStorage.getItem('talentprism_current_role_id');
+        if (syncRes.active_role_id && (!explicitLocalRoleId || storedRoleId === 'job_backend_core')) {
+          if (syncRes.active_role_id !== storedRoleId) {
+            storedRoleId = syncRes.active_role_id;
+            storage.setCurrentRoleId(syncRes.active_role_id);
+          }
+        }
       }
 
       // Fetch current candidates, job specs, and role catalog
@@ -122,12 +227,15 @@ export function App() {
         api.getRoles(),
       ]);
 
-      // Merge backend roles with custom roles stored in browser, filtering out deleted ones
+      // Merge factory presets + backend roles + custom roles, filtering out deleted ones
       const mergedRolesMap = new Map<string, JobRole>();
+      DEFAULT_PRESET_ROLES.forEach((r) => {
+        if (!deletedRoleIds.includes(r.id)) mergedRolesMap.set(r.id, r);
+      });
       (rolesData || []).forEach((r) => {
         if (!deletedRoleIds.includes(r.id)) mergedRolesMap.set(r.id, r);
       });
-      customRoles.forEach((r) => {
+      storage.getCustomRoles().forEach((r) => {
         if (!deletedRoleIds.includes(r.id)) mergedRolesMap.set(r.id, r);
       });
       const mergedRoles = Array.from(mergedRolesMap.values());
@@ -163,18 +271,22 @@ export function App() {
     } catch (e) {
       console.error('Failed to load initial data:', e);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
     localStorage.setItem('talentprism_user', JSON.stringify(user));
+    broadcastTabSync({ type: 'AUTH_CHANGED', payload: { user } });
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('talentprism_user');
+    broadcastTabSync({ type: 'AUTH_CHANGED', payload: { user: null } });
   };
 
   const handleDisconnectJD = async () => {
@@ -195,6 +307,10 @@ export function App() {
       }
       setCandidates(newCandidates);
       storage.saveCachedCandidates('none', newCandidates);
+      broadcastTabSync({
+        type: 'ROLE_CHANGED',
+        payload: { roleId: 'none', requirements: [], candidates: newCandidates },
+      });
     } catch (err) {
       console.error('Failed to disconnect JD:', err);
     } finally {
@@ -216,11 +332,14 @@ export function App() {
 
       const res = await api.selectRole(roleId, targetRole);
 
+      let effectiveReqs: JobRequirement[] = [];
       const storedReqs = storage.getCalibratedRequirements(roleId);
       if (storedReqs && storedReqs.length > 0) {
+        effectiveReqs = storedReqs;
         setRequirements(storedReqs);
       } else if (res.job) {
-        setRequirements(res.job.requirements || []);
+        effectiveReqs = res.job.requirements || [];
+        setRequirements(effectiveReqs);
       }
 
       let newCandidates: RankedCandidate[] = [];
@@ -233,6 +352,10 @@ export function App() {
 
       setCandidates(newCandidates);
       storage.saveCachedCandidates(roleId, newCandidates);
+      broadcastTabSync({
+        type: 'ROLE_CHANGED',
+        payload: { roleId, requirements: effectiveReqs, candidates: newCandidates },
+      });
     } catch (e) {
       console.error('Failed to switch job role:', e);
     } finally {
@@ -258,6 +381,10 @@ export function App() {
     const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
     setCandidates(filtered);
     storage.saveCachedCandidates(currentRoleId, filtered);
+    broadcastTabSync({
+      type: 'ROLE_CHANGED',
+      payload: { roleId: currentRoleId, requirements: newReqs, candidates: filtered },
+    });
   };
 
   const handleUploadSuccess = async (newUploads?: any) => {
@@ -270,6 +397,10 @@ export function App() {
     const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
     setCandidates(filtered);
     storage.saveCachedCandidates(currentRoleId, filtered);
+    broadcastTabSync({
+      type: 'CANDIDATE_ADDED',
+      payload: { newUploads },
+    });
   };
 
   const handleRoleCreated = (
@@ -285,6 +416,7 @@ export function App() {
       return exists ? prev.map((r) => (r.id === newRole.id ? newRole : r)) : [...prev, newRole];
     });
 
+    let finalCandidates = updatedCandidates;
     if (activate) {
       storage.setCurrentRoleId(newRole.id);
       setCurrentRoleId(newRole.id);
@@ -295,8 +427,14 @@ export function App() {
         const filtered = updatedCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
         setCandidates(filtered);
         storage.saveCachedCandidates(newRole.id, filtered);
+        finalCandidates = filtered;
       }
     }
+
+    broadcastTabSync({
+      type: 'ROLE_CREATED',
+      payload: { role: newRole, active: activate, candidates: finalCandidates },
+    });
   };
 
   const handleRemoveCandidate = async (candidateId: string, candidateName: string) => {
@@ -306,6 +444,10 @@ export function App() {
         const updated = prev.filter((c) => c.id !== candidateId);
         storage.saveCachedCandidates(currentRoleId, updated);
         return updated;
+      });
+      broadcastTabSync({
+        type: 'CANDIDATE_REMOVED',
+        payload: { candidateId },
       });
       await api.deleteCandidate(candidateId);
     } catch (err) {
@@ -367,6 +509,11 @@ export function App() {
         storage.saveCachedCandidates(nextRole.id, newCandidates);
       }
 
+      broadcastTabSync({
+        type: 'ROLE_DELETED',
+        payload: { roleId: roleIdToDelete, nextRoleId: remainingRoles[0]?.id },
+      });
+
       await api.deleteRole(roleIdToDelete).catch((err) => {
         console.warn('Backend delete role notice:', err);
       });
@@ -386,6 +533,7 @@ export function App() {
       try {
         setLoading(true);
         storage.resetAllState();
+        broadcastTabSync({ type: 'FULL_SYNC' });
         await api.resetDemoData();
         window.location.reload();
       } catch (e) {

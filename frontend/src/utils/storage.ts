@@ -19,6 +19,91 @@ export const PROTECTED_PRESET_IDS = new Set([
   'job_ml_eng',
 ]);
 
+// 5 System Pre-configured Industry Roles (Factory defaults)
+export const DEFAULT_PRESET_ROLES: JobRole[] = [
+  {
+    id: 'job_backend_core',
+    title: 'Senior Backend Engineer (SDE / Core Systems)',
+    department: 'Core Platform & Infrastructure',
+    description: 'Architect high-concurrency microservices, optimize distributed data pipelines, design resilient RESTful APIs, and manage database scalability.',
+    requirements: [
+      { id: 'req_1', name: 'Python', category: 'REQUIRED', priority: 'Critical', weight: 1.3, canonical_skill: 'Python' },
+      { id: 'req_2', name: 'FastAPI', category: 'REQUIRED', priority: 'Critical', weight: 1.2, canonical_skill: 'FastAPI' },
+      { id: 'req_3', name: 'SQL', category: 'REQUIRED', priority: 'High', weight: 1.0, canonical_skill: 'SQL' },
+      { id: 'req_4', name: 'REST APIs', category: 'REQUIRED', priority: 'High', weight: 1.0, canonical_skill: 'REST APIs' },
+      { id: 'req_5', name: 'Docker', category: 'PREFERRED', priority: 'Medium', weight: 0.9, canonical_skill: 'Docker' },
+      { id: 'req_6', name: 'AWS', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'AWS' },
+      { id: 'req_7', name: 'Redis', category: 'PREFERRED', priority: 'Medium', weight: 0.7, canonical_skill: 'Redis' },
+      { id: 'req_8', name: 'Kubernetes', category: 'BONUS', priority: 'Low', weight: 0.5, canonical_skill: 'Kubernetes' },
+      { id: 'req_9', name: 'Kafka', category: 'BONUS', priority: 'Low', weight: 0.5, canonical_skill: 'Kafka' },
+    ],
+  },
+  {
+    id: 'job_fullstack',
+    title: 'Full Stack & Frontend Engineer (React / TypeScript)',
+    department: 'Product Engineering',
+    description: 'Build high-performance web applications, interactive design systems, responsive client-side state architectures, and robust API integrations.',
+    requirements: [
+      { id: 'fs_req_1', name: 'React', category: 'REQUIRED', priority: 'Critical', weight: 1.3, canonical_skill: 'React' },
+      { id: 'fs_req_2', name: 'TypeScript', category: 'REQUIRED', priority: 'Critical', weight: 1.2, canonical_skill: 'TypeScript' },
+      { id: 'fs_req_3', name: 'REST APIs', category: 'REQUIRED', priority: 'High', weight: 1.0, canonical_skill: 'REST APIs' },
+      { id: 'fs_req_4', name: 'Tailwind CSS', category: 'REQUIRED', priority: 'High', weight: 1.0, canonical_skill: 'Tailwind CSS' },
+      { id: 'fs_req_5', name: 'Python', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'Python' },
+      { id: 'fs_req_6', name: 'FastAPI', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'FastAPI' },
+      { id: 'fs_req_7', name: 'Docker', category: 'PREFERRED', priority: 'Medium', weight: 0.7, canonical_skill: 'Docker' },
+      { id: 'fs_req_8', name: 'GraphQL', category: 'BONUS', priority: 'Low', weight: 0.5, canonical_skill: 'GraphQL' },
+    ],
+  },
+  {
+    id: 'job_data_eng',
+    title: 'Senior Data Platform Engineer',
+    department: 'Data Platform & Analytics',
+    description: 'Build real-time stream ingestion, maintain petabyte-scale data lakes, orchestrate complex ETL workflows, and tune partitioned relational warehouses.',
+    requirements: [
+      { id: 'de_req_1', name: 'Python', category: 'REQUIRED', priority: 'Critical', weight: 1.3, canonical_skill: 'Python' },
+      { id: 'de_req_2', name: 'SQL', category: 'REQUIRED', priority: 'Critical', weight: 1.3, canonical_skill: 'SQL' },
+      { id: 'de_req_3', name: 'Kafka', category: 'REQUIRED', priority: 'High', weight: 1.1, canonical_skill: 'Kafka' },
+      { id: 'de_req_4', name: 'PostgreSQL', category: 'REQUIRED', priority: 'High', weight: 1.0, canonical_skill: 'PostgreSQL' },
+      { id: 'de_req_5', name: 'AWS', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'AWS' },
+      { id: 'de_req_6', name: 'Docker', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'Docker' },
+      { id: 'de_req_7', name: 'Redis', category: 'PREFERRED', priority: 'Medium', weight: 0.7, canonical_skill: 'Redis' },
+      { id: 'de_req_8', name: 'Kubernetes', category: 'BONUS', priority: 'Low', weight: 0.5, canonical_skill: 'Kubernetes' },
+    ],
+  },
+  {
+    id: 'job_devops_infra',
+    title: 'Platform Infrastructure & DevOps Engineer',
+    department: 'Cloud & Infrastructure Operations',
+    description: 'Architect multi-cloud Kubernetes clusters, streamline GitOps CI/CD delivery pipelines, manage infrastructure-as-code, and ensure high availability.',
+    requirements: [
+      { id: 'do_req_1', name: 'Docker', category: 'REQUIRED', priority: 'Critical', weight: 1.3, canonical_skill: 'Docker' },
+      { id: 'do_req_2', name: 'Kubernetes', category: 'REQUIRED', priority: 'Critical', weight: 1.3, canonical_skill: 'Kubernetes' },
+      { id: 'do_req_3', name: 'AWS', category: 'REQUIRED', priority: 'High', weight: 1.1, canonical_skill: 'AWS' },
+      { id: 'do_req_4', name: 'CI/CD', category: 'REQUIRED', priority: 'High', weight: 1.0, canonical_skill: 'CI/CD' },
+      { id: 'do_req_5', name: 'Python', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'Python' },
+      { id: 'do_req_6', name: 'Linux', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'Linux' },
+      { id: 'do_req_7', name: 'Redis', category: 'BONUS', priority: 'Low', weight: 0.5, canonical_skill: 'Redis' },
+      { id: 'do_req_8', name: 'Kafka', category: 'BONUS', priority: 'Low', weight: 0.5, canonical_skill: 'Kafka' },
+    ],
+  },
+  {
+    id: 'job_ml_eng',
+    title: 'Machine Learning & AI Systems Engineer',
+    department: 'Applied AI Research',
+    description: 'Deploy deep learning models in production, build low-latency inference microservices, scale vector databases, and manage feature pipelines.',
+    requirements: [
+      { id: 'ml_req_1', name: 'Python', category: 'REQUIRED', priority: 'Critical', weight: 1.3, canonical_skill: 'Python' },
+      { id: 'ml_req_2', name: 'PyTorch', category: 'REQUIRED', priority: 'Critical', weight: 1.2, canonical_skill: 'PyTorch' },
+      { id: 'ml_req_3', name: 'FastAPI', category: 'REQUIRED', priority: 'High', weight: 1.1, canonical_skill: 'FastAPI' },
+      { id: 'ml_req_4', name: 'SQL', category: 'REQUIRED', priority: 'High', weight: 1.0, canonical_skill: 'SQL' },
+      { id: 'ml_req_5', name: 'Docker', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'Docker' },
+      { id: 'ml_req_6', name: 'AWS', category: 'PREFERRED', priority: 'Medium', weight: 0.8, canonical_skill: 'AWS' },
+      { id: 'ml_req_7', name: 'Kubernetes', category: 'BONUS', priority: 'Low', weight: 0.5, canonical_skill: 'Kubernetes' },
+      { id: 'ml_req_8', name: 'Kafka', category: 'BONUS', priority: 'Low', weight: 0.5, canonical_skill: 'Kafka' },
+    ],
+  },
+];
+
 export const storage = {
   // --- Active Tab ---
   getActiveTab(defaultTab: string = 'dashboard'): string {
@@ -41,7 +126,7 @@ export const storage = {
   getCurrentRoleId(defaultId: string = 'job_backend_core'): string {
     try {
       const val = localStorage.getItem(KEYS.CURRENT_ROLE_ID);
-      if (val !== null) return val;
+      if (val !== null && val !== '') return val;
       return defaultId;
     } catch {
       return defaultId;
@@ -56,7 +141,7 @@ export const storage = {
     }
   },
 
-  // --- Custom Roles (Manually Added JDs) ---
+  // --- Custom Roles (Manually Added / Uploaded JDs) ---
   getCustomRoles(): JobRole[] {
     try {
       const data = localStorage.getItem(KEYS.CUSTOM_ROLES);
@@ -82,6 +167,41 @@ export const storage = {
       localStorage.setItem(`${PREFIX}deleted_role_ids`, JSON.stringify(deletedIds));
     } catch (e) {
       console.error('Failed to save custom role to localStorage', e);
+    }
+  },
+
+  saveCustomRoles(newRoles: JobRole[]): void {
+    try {
+      if (!newRoles || newRoles.length === 0) return;
+      const roles = storage.getCustomRoles();
+      const map = new Map<string, JobRole>();
+      roles.forEach((r) => map.set(r.id, r));
+      newRoles.forEach((r) => {
+        if (r && r.id && !PROTECTED_PRESET_IDS.has(r.id)) {
+          map.set(r.id, r);
+        }
+      });
+      localStorage.setItem(KEYS.CUSTOM_ROLES, JSON.stringify(Array.from(map.values())));
+    } catch (e) {
+      console.error('Failed to save custom roles to localStorage', e);
+    }
+  },
+
+  // --- Combined All Available Roles (Presets + Custom, Minus Deleted) ---
+  getAllAvailableRoles(): JobRole[] {
+    try {
+      const deletedIds = storage.getDeletedRoleIds();
+      const custom = storage.getCustomRoles();
+      const map = new Map<string, JobRole>();
+      DEFAULT_PRESET_ROLES.forEach((r) => {
+        if (!deletedIds.includes(r.id)) map.set(r.id, r);
+      });
+      custom.forEach((r) => {
+        if (!deletedIds.includes(r.id)) map.set(r.id, r);
+      });
+      return Array.from(map.values());
+    } catch {
+      return DEFAULT_PRESET_ROLES;
     }
   },
 
@@ -207,7 +327,9 @@ export const storage = {
       if (!cands || cands.length === 0) return;
       const existing = storage.getUploadedCandidates();
       const map = new Map<string, any>();
-      existing.forEach((c) => map.set(c.id, c));
+      existing.forEach((c) => {
+        if (c && c.id) map.set(c.id, c);
+      });
       cands.forEach((c) => {
         if (c && c.id) map.set(c.id, c);
       });
@@ -230,3 +352,48 @@ export const storage = {
     }
   },
 };
+
+// --- Real-time Cross-Tab Broadcast Channel ---
+let syncBroadcastChannel: BroadcastChannel | null = null;
+try {
+  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    syncBroadcastChannel = new BroadcastChannel('talentprism_sync_channel');
+  }
+} catch {
+  syncBroadcastChannel = null;
+}
+
+export function broadcastTabSync(message: { type: string; payload?: any }): void {
+  try {
+    if (syncBroadcastChannel) {
+      syncBroadcastChannel.postMessage({ ...message, timestamp: Date.now() });
+    }
+  } catch (e) {
+    console.warn('Failed to broadcast sync message:', e);
+  }
+}
+
+export function subscribeTabSync(callback: (message: { type: string; payload?: any; timestamp: number }) => void): () => void {
+  const handler = (event: MessageEvent) => {
+    if (event && event.data) {
+      callback(event.data);
+    }
+  };
+  if (syncBroadcastChannel) {
+    syncBroadcastChannel.addEventListener('message', handler);
+  }
+
+  const storageHandler = (e: StorageEvent) => {
+    if (e.key && e.key.startsWith(PREFIX)) {
+      callback({ type: 'STORAGE_CHANGE', payload: { key: e.key, newValue: e.newValue }, timestamp: Date.now() });
+    }
+  };
+  window.addEventListener('storage', storageHandler);
+
+  return () => {
+    if (syncBroadcastChannel) {
+      syncBroadcastChannel.removeEventListener('message', handler);
+    }
+    window.removeEventListener('storage', storageHandler);
+  };
+}

@@ -1,6 +1,9 @@
 import uuid
 import re
 import hashlib
+import os
+import json
+import tempfile
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body
 from app.models.schemas import (
@@ -22,11 +25,22 @@ from app.services.nlp_engine import nlp_engine
 
 router = APIRouter()
 
+PROTECTED_PRESET_ROLES = {
+    "job_backend_core",
+    "job_fullstack",
+    "job_data_eng",
+    "job_devops_infra",
+    "job_ml_eng"
+}
+
+STATE_FILE = os.path.join(tempfile.gettempdir(), "talentprism_shared_state.json")
+
 # In-memory storage state (backed by seed data)
 current_job = dict(GLOBAL_JOB)
 candidates_store: Dict[str, Dict[str, Any]] = {c["id"]: dict(c) for c in GLOBAL_CANDIDATES}
 current_weights = ScoringWeights()
 previous_ranks_cache: Dict[str, int] = {}
+registered_users: Dict[str, Dict[str, Any]] = {}
 
 def normalize_requirement(req: Any) -> JobRequirement:
     """Safely converts a dict or model into a valid JobRequirement instance."""
@@ -42,6 +56,149 @@ def normalize_requirement(req: Any) -> JobRequirement:
         weight=float(getattr(req, "weight", 1.0)),
         canonical_skill=str(getattr(req, "canonical_skill", getattr(req, "name", "Skill")))
     )
+
+def serialize_requirement(req: Any) -> Dict[str, Any]:
+    if hasattr(req, "model_dump"):
+        return req.model_dump()
+    if hasattr(req, "dict"):
+        return req.dict()
+    if isinstance(req, dict):
+        return req
+    return {
+        "id": str(getattr(req, "id", "")),
+        "name": str(getattr(req, "name", "")),
+        "category": str(getattr(req, "category", "REQUIRED")),
+        "priority": str(getattr(req, "priority", "High")),
+        "weight": float(getattr(req, "weight", 1.0)),
+        "canonical_skill": str(getattr(req, "canonical_skill", getattr(req, "name", "")))
+    }
+
+def serialize_role(role: Dict[str, Any]) -> Dict[str, Any]:
+    r_copy = dict(role)
+    r_copy["requirements"] = [serialize_requirement(r) for r in r_copy.get("requirements", [])]
+    return r_copy
+
+def serialize_candidate(cand: Dict[str, Any]) -> Dict[str, Any]:
+    c_copy = dict(cand)
+    if "skill_evals" in c_copy and isinstance(c_copy["skill_evals"], dict):
+        new_evals = {}
+        for k, v in c_copy["skill_evals"].items():
+            if hasattr(v, "model_dump"):
+                new_evals[k] = v.model_dump()
+            elif hasattr(v, "dict"):
+                new_evals[k] = v.dict()
+            elif isinstance(v, dict):
+                new_evals[k] = v
+        c_copy["skill_evals"] = new_evals
+    if "evidence_list" in c_copy and isinstance(c_copy["evidence_list"], list):
+        new_ev = []
+        for item in c_copy["evidence_list"]:
+            if hasattr(item, "model_dump"):
+                new_ev.append(item.model_dump())
+            elif hasattr(item, "dict"):
+                new_ev.append(item.dict())
+            elif isinstance(item, dict):
+                new_ev.append(item)
+        c_copy["evidence_list"] = new_ev
+    return c_copy
+
+def load_server_state():
+    """Load persistent shared state across serverless lambda invocations and browsers."""
+    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # 1. Custom roles
+            saved_roles = data.get("custom_roles", {})
+            if isinstance(saved_roles, dict):
+                for r_id, r in saved_roles.items():
+                    if r_id and isinstance(r, dict):
+                        r_copy = dict(r)
+                        r_copy["requirements"] = [normalize_requirement(x) for x in r_copy.get("requirements", [])]
+                        PRECONFIGURED_ROLES[r_id] = r_copy
+            elif isinstance(saved_roles, list):
+                for r in saved_roles:
+                    if isinstance(r, dict) and r.get("id"):
+                        r_copy = dict(r)
+                        r_copy["requirements"] = [normalize_requirement(x) for x in r_copy.get("requirements", [])]
+                        PRECONFIGURED_ROLES[r["id"]] = r_copy
+            
+            # 2. Registered users
+            saved_users = data.get("registered_users", {})
+            if isinstance(saved_users, dict):
+                for u_id, u in saved_users.items():
+                    if u_id and isinstance(u, dict):
+                        registered_users[u_id] = u
+            elif isinstance(saved_users, list):
+                for u in saved_users:
+                    if isinstance(u, dict):
+                        key = u.get("email") or u.get("name")
+                        if key:
+                            registered_users[key] = u
+                    
+            # 3. Uploaded candidates
+            saved_cands = data.get("uploaded_candidates", {})
+            if isinstance(saved_cands, dict):
+                for c_id, c in saved_cands.items():
+                    if c_id and isinstance(c, dict):
+                        candidates_store[c_id] = c
+            elif isinstance(saved_cands, list):
+                for c in saved_cands:
+                    if isinstance(c, dict) and c.get("id"):
+                        candidates_store[c["id"]] = c
+                    
+            # 4. Active job role
+            active_id = data.get("active_role_id")
+            if active_id == "none":
+                current_job = {
+                    "id": "none",
+                    "title": "No Active JD (Disconnected)",
+                    "department": "None",
+                    "description": "No job description is currently executing. All applicants displayed in general talent pool.",
+                    "requirements": []
+                }
+            elif active_id and active_id in PRECONFIGURED_ROLES:
+                current_job = dict(PRECONFIGURED_ROLES[active_id])
+                current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
+
+            # 5. Scoring weights
+            saved_weights = data.get("scoring_weights")
+            if saved_weights and isinstance(saved_weights, dict):
+                try:
+                    current_weights = ScoringWeights(**saved_weights)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[load_server_state] Warning: {e}")
+
+def save_server_state():
+    """Persist shared state to file so other invocations and browsers get synced state."""
+    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users
+    try:
+        custom_roles = {
+            r_id: serialize_role(r) for r_id, r in PRECONFIGURED_ROLES.items()
+            if r_id not in PROTECTED_PRESET_ROLES
+        }
+        uploaded_cands = {
+            c_id: serialize_candidate(c) for c_id, c in candidates_store.items()
+            if str(c_id).startswith("cand_upload_")
+        }
+        active_id = current_job.get("id", "job_backend_core")
+        weights_dict = current_weights.model_dump() if hasattr(current_weights, "model_dump") else current_weights.dict()
+        
+        state_data = {
+            "active_role_id": active_id,
+            "custom_roles": custom_roles,
+            "registered_users": registered_users,
+            "uploaded_candidates": uploaded_cands,
+            "scoring_weights": weights_dict,
+        }
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, ensure_ascii=False, indent=2, default=str)
+    except Exception as e:
+        print(f"[save_server_state] Warning: {e}")
 
 def get_current_job_requirements() -> List[JobRequirement]:
     """Retrieves and normalizes current_job requirements."""
@@ -95,6 +252,9 @@ def refresh_baseline_ranking():
             candidates_store[c.id]["rank"] = c.rank
             candidates_store[c.id]["overall_match"] = c.overall_match
 
+# Hydrate persistent state from disk if present
+load_server_state()
+reevaluate_candidates_for_job(current_job.get("requirements", []))
 refresh_baseline_ranking()
 
 # --- AUTH / HEALTH ---
@@ -108,8 +268,7 @@ VALID_ADMIN_KEYS = {
     "Admin@2025"
 }
 
-# Registered users storage (dynamically holds new admins and users)
-registered_users: Dict[str, Dict[str, Any]] = {}
+# Dynamic registered users storage is hydrated from disk via load_server_state()
 
 def extract_name_from_email(email: str) -> str:
     """Infers a professional human name from an email prefix if not supplied."""
@@ -216,6 +375,7 @@ def find_user_record(identifier: str, client_backup: Optional[Dict[str, Any]] = 
 
 @router.post("/auth/login")
 def login(payload: Dict[str, Any] = Body(...)):
+    load_server_state()
     identifier = str(payload.get("email", "")).strip()
     password = str(payload.get("password", "")).strip()
     client_backup = payload.get("registered_user_backup")
@@ -271,6 +431,7 @@ def login(payload: Dict[str, Any] = Body(...)):
 @router.post("/auth/register")
 def register_user(payload: Dict[str, Any] = Body(...)):
     """Registers a new corporate administrator/user using the enterprise authorization passkey."""
+    load_server_state()
     email = str(payload.get("email", "")).strip().lower()
     name = str(payload.get("name", "")).strip()
     password = str(payload.get("password", "")).strip()
@@ -306,6 +467,7 @@ def register_user(payload: Dict[str, Any] = Body(...)):
     }
     registered_users[email] = user_record
     registered_users[name.lower()] = user_record
+    save_server_state()
 
     session_token = f"prism_token_{hashlib.sha256(f'{email}:{password}:talentprism_salt'.encode()).hexdigest()[:24]}"
     return {
@@ -325,11 +487,13 @@ def register_user(payload: Dict[str, Any] = Body(...)):
 # --- JOBS ---
 @router.get("/jobs")
 def get_jobs():
+    load_server_state()
     return [current_job]
 
 @router.get("/jobs/roles")
 def get_all_roles():
-    """Returns the 5 pre-configured industry role specifications."""
+    """Returns all pre-configured industry roles and custom user roles."""
+    load_server_state()
     return list(PRECONFIGURED_ROLES.values())
 
 @router.post("/jobs/disconnect-jd")
@@ -363,6 +527,8 @@ def disconnect_jd():
             candidates_store[r.id]["rank"] = r.rank
             candidates_store[r.id]["overall_match"] = r.overall_match
 
+    save_server_state()
+
     return {
         "success": True,
         "active_job": current_job,
@@ -376,6 +542,7 @@ def select_job_role(payload: Dict[str, Any] = Body(...)):
     or pass role_id="none" to clear / disconnect the active JD.
     """
     global current_job
+    load_server_state()
     role_id = payload.get("role_id", "job_backend_core")
     role_data = payload.get("role_data")
 
@@ -410,19 +577,13 @@ def select_job_role(payload: Dict[str, Any] = Body(...)):
             candidates_store[r.id]["rank"] = r.rank
             candidates_store[r.id]["overall_match"] = r.overall_match
 
+    save_server_state()
+
     return {
         "success": True,
         "active_job": current_job,
         "ranked_candidates": ranked
     }
-
-PROTECTED_PRESET_ROLES = {
-    "job_backend_core",
-    "job_fullstack",
-    "job_data_eng",
-    "job_devops_infra",
-    "job_ml_eng"
-}
 
 @router.delete("/jobs/roles/{role_id}")
 def delete_job_role(role_id: str):
@@ -431,6 +592,7 @@ def delete_job_role(role_id: str):
     Preconfigured preset roles are protected from deletion.
     """
     global current_job
+    load_server_state()
     if role_id in PROTECTED_PRESET_ROLES:
         raise HTTPException(
             status_code=400,
@@ -449,6 +611,8 @@ def delete_job_role(role_id: str):
         reevaluate_candidates_for_job(current_job["requirements"])
         refresh_baseline_ranking()
 
+    save_server_state()
+
     return {
         "success": True,
         "deleted_role_id": role_id,
@@ -460,9 +624,10 @@ def delete_job_role(role_id: str):
 def sync_state(payload: Dict[str, Any] = Body(...)):
     """
     Sync client-side persistent state (custom roles, active role ID, removed candidates, custom requirements)
-    to the active backend worker.
+    to the active backend worker. Enables seamless cross-browser synchronization.
     """
     global current_job, candidates_store, current_weights
+    load_server_state()
     
     # 0. Remove any deleted custom roles from client (never delete protected preset roles)
     deleted_role_ids = payload.get("deleted_role_ids", [])
@@ -475,29 +640,51 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
     for r in custom_roles:
         r_id = r.get("id")
         if r_id and r_id not in deleted_role_ids:
-            PRECONFIGURED_ROLES[r_id] = r
+            norm_r = dict(r)
+            norm_r["requirements"] = [normalize_requirement(x) for x in norm_r.get("requirements", [])]
+            PRECONFIGURED_ROLES[r_id] = norm_r
             
     # 2. Set active role if specified
+    is_initial_load = bool(payload.get("is_initial_load", False))
     active_role_id = payload.get("active_role_id")
-    if active_role_id in ("none", "null", ""):
-        current_job = {
-            "id": "none",
-            "title": "No Active JD (Disconnected)",
-            "department": "None",
-            "description": "No job description is currently executing. All applicants displayed in general talent pool.",
-            "requirements": []
-        }
-    elif active_role_id and active_role_id in PRECONFIGURED_ROLES:
-        current_job = dict(PRECONFIGURED_ROLES[active_role_id])
+    
+    if is_initial_load:
+        # If client is just starting up, preserve current active role on server if valid
+        if current_job.get("id") == "none":
+            pass
+        elif current_job.get("id") and current_job.get("id") in PRECONFIGURED_ROLES:
+            pass
+        elif active_role_id in ("none", "null", ""):
+            current_job = {
+                "id": "none",
+                "title": "No Active JD (Disconnected)",
+                "department": "None",
+                "description": "No job description is currently executing. All applicants displayed in general talent pool.",
+                "requirements": []
+            }
+        elif active_role_id and active_role_id in PRECONFIGURED_ROLES:
+            current_job = dict(PRECONFIGURED_ROLES[active_role_id])
+    else:
+        if active_role_id in ("none", "null", ""):
+            current_job = {
+                "id": "none",
+                "title": "No Active JD (Disconnected)",
+                "department": "None",
+                "description": "No job description is currently executing. All applicants displayed in general talent pool.",
+                "requirements": []
+            }
+        elif active_role_id and active_role_id in PRECONFIGURED_ROLES:
+            current_job = dict(PRECONFIGURED_ROLES[active_role_id])
     
     # 3. Apply custom calibrated requirements if specified (only when active_role_id != 'none')
-    if active_role_id not in ("none", "null", ""):
+    if current_job.get("id") not in ("none", "null", ""):
         custom_reqs = payload.get("custom_requirements")
-        if custom_reqs and isinstance(custom_reqs, list):
+        if custom_reqs and isinstance(custom_reqs, list) and len(custom_reqs) > 0 and not is_initial_load:
             norm_custom_reqs = [normalize_requirement(r) for r in custom_reqs]
             current_job["requirements"] = norm_custom_reqs
-            if active_role_id and active_role_id in PRECONFIGURED_ROLES:
-                PRECONFIGURED_ROLES[active_role_id]["requirements"] = norm_custom_reqs
+            cur_id = current_job.get("id")
+            if cur_id and cur_id in PRECONFIGURED_ROLES:
+                PRECONFIGURED_ROLES[cur_id]["requirements"] = norm_custom_reqs
         else:
             current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
     else:
@@ -532,10 +719,15 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
         current_weights
     )
 
+    save_server_state()
+
     return {
         "success": True,
+        "active_role_id": current_job.get("id", "job_backend_core"),
         "active_job": current_job,
         "available_roles": list(PRECONFIGURED_ROLES.values()),
+        "custom_roles": [r for r in PRECONFIGURED_ROLES.values() if r.get("id") not in PROTECTED_PRESET_ROLES],
+        "uploaded_candidates": [c for c in candidates_store.values() if str(c.get("id", "")).startswith("cand_upload_")],
         "ranked_candidates": ranked
     }
 
@@ -543,6 +735,11 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
 def reset_demo_data():
     """Reset candidate store and roles back to default factory seed data."""
     global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES
+    if os.path.exists(STATE_FILE):
+        try:
+            os.remove(STATE_FILE)
+        except Exception:
+            pass
     from app.services.seed_data import GLOBAL_JOB, GLOBAL_CANDIDATES, PRECONFIGURED_ROLES as DEFAULT_ROLES
     PRECONFIGURED_ROLES = dict(DEFAULT_ROLES)
     current_job = dict(GLOBAL_JOB)
@@ -554,6 +751,7 @@ def reset_demo_data():
         current_job["requirements"],
         current_weights
     )
+    save_server_state()
     return {
         "success": True,
         "message": "Reset to factory seed data complete",
@@ -564,6 +762,7 @@ def reset_demo_data():
 
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str):
+    load_server_state()
     if job_id in ("none", "null"):
         return {
             "id": "none",
@@ -579,6 +778,7 @@ def get_job(job_id: str):
 @router.post("/jobs")
 def create_job(payload: JobCreate):
     global current_job, previous_ranks_cache
+    load_server_state()
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     norm_reqs = [normalize_requirement(r) for r in payload.requirements]
     new_job = {
@@ -605,6 +805,8 @@ def create_job(payload: JobCreate):
         if r.id in candidates_store:
             candidates_store[r.id]["rank"] = r.rank
             candidates_store[r.id]["overall_match"] = r.overall_match
+
+    save_server_state()
 
     return {
         "success": True,
@@ -807,6 +1009,8 @@ def activate_parsed_jd(parsed: Dict[str, Any]) -> Dict[str, Any]:
             candidates_store[r.id]["rank"] = r.rank
             candidates_store[r.id]["overall_match"] = r.overall_match
 
+    save_server_state()
+
     parsed["job"] = new_job
     parsed["ranked_candidates"] = ranked
     parsed["all_roles"] = list(PRECONFIGURED_ROLES.values())
@@ -895,6 +1099,8 @@ def update_job_requirements(job_id: str, payload: JobUpdateRequirements):
         if r.id in candidates_store:
             candidates_store[r.id]["rank"] = r.rank
             candidates_store[r.id]["overall_match"] = r.overall_match
+
+    save_server_state()
 
     return {
         "success": True,
@@ -1010,6 +1216,7 @@ async def upload_resume(file: UploadFile = File(...)):
 
         candidates_store[cand_id] = new_cand
         refresh_baseline_ranking()
+        save_server_state()
         return {"candidate": new_cand, "language": lang_res, "entities": entities}
     except Exception as e:
         import traceback
@@ -1140,6 +1347,8 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
                 candidates_store[r.id]["rank"] = r.rank
                 candidates_store[r.id]["overall_match"] = r.overall_match
 
+        save_server_state()
+
         return {
             "success": True,
             "uploaded_count": len(created_candidates),
@@ -1153,6 +1362,7 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
 
 @router.get("/candidates")
 def get_candidates():
+    load_server_state()
     ranked, _ = scoring_engine.rank_candidates(
         list(candidates_store.values()),
         current_job["requirements"],
@@ -1168,6 +1378,7 @@ def get_candidate_safe(candidate_id: str) -> Dict[str, Any]:
     synthesizes a fully valid candidate profile to guarantee no 404 crashes.
     """
     global candidates_store
+    load_server_state()
     cand = candidates_store.get(candidate_id)
     if cand:
         return cand
@@ -1283,6 +1494,7 @@ def delete_candidate(candidate_id: str):
             if r.id in candidates_store:
                 candidates_store[r.id]["rank"] = r.rank
                 candidates_store[r.id]["overall_match"] = r.overall_match
+        save_server_state()
         return {"success": True, "deleted_id": candidate_id, "remaining_candidates": ranked}
     return {"success": True, "deleted_id": candidate_id, "remaining_candidates": []}
 
@@ -1439,6 +1651,8 @@ def recalculate_ranking(job_id: str, payload: Dict[str, Any] = Body(...)):
         if r.id in candidates_store:
             candidates_store[r.id]["rank"] = r.rank
             candidates_store[r.id]["overall_match"] = r.overall_match
+
+    save_server_state()
 
     return {
         "success": True,
