@@ -17,8 +17,10 @@ import {
   RotateCcw,
   XCircle,
   Unlink,
+  Trash2,
 } from 'lucide-react';
 import { JobRole, User } from '../types';
+import { PROTECTED_PRESET_IDS } from '../utils/storage';
 
 interface HeaderProps {
   activeTab: string;
@@ -35,6 +37,7 @@ interface HeaderProps {
   onOpenManualAddJD: (mode?: 'upload' | 'manual') => void;
   onResetDemoData?: () => void;
   onDisconnectJD?: () => void;
+  onDeleteRole?: (roleId: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -52,6 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenManualAddJD,
   onResetDemoData,
   onDisconnectJD,
+  onDeleteRole,
 }) => {
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
 
@@ -69,6 +73,10 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isJDConnected = currentRoleId !== 'none' && Boolean(availableRoles.find((r) => r.id === currentRoleId));
   const currentRole = isJDConnected ? availableRoles.find((r) => r.id === currentRoleId) : null;
+  const isPreset = isJDConnected && currentRoleId ? PROTECTED_PRESET_IDS.has(currentRoleId) : false;
+
+  const presetRoles = availableRoles.filter((r) => PROTECTED_PRESET_IDS.has(r.id));
+  const customRoles = availableRoles.filter((r) => !PROTECTED_PRESET_IDS.has(r.id));
 
   return (
     <header className="sticky top-0 z-40 bg-[#080c16]/95 backdrop-blur-md border-b border-white/10">
@@ -149,9 +157,13 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
                 <div className="flex flex-col text-left">
                   <span className={`text-[9px] uppercase font-bold tracking-wider font-mono ${
-                    isJDConnected ? 'text-cyan-400' : 'text-amber-400'
+                    isJDConnected
+                      ? (isPreset ? 'text-cyan-400' : 'text-emerald-400')
+                      : 'text-amber-400'
                   }`}>
-                    {isJDConnected ? 'Active JD Role' : 'No JD Connected'}
+                    {isJDConnected
+                      ? (isPreset ? 'Preset Role' : 'Custom Uploaded JD')
+                      : 'No JD Connected'}
                   </span>
                   <span className="text-white font-bold text-xs truncate max-w-[200px]">
                     {isJDConnected ? (currentRole?.title || 'Connected JD') : 'Disconnected (Raw Pool)'}
@@ -166,7 +178,7 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* Role Dropdown Menu */}
               {roleDropdownOpen && (
-                <div className="absolute top-full left-0 mt-2 w-84 rounded-2xl bg-slate-950 border border-cyan-500/40 shadow-2xl p-2.5 z-50 space-y-2">
+                <div className="absolute top-full left-0 mt-2 w-88 rounded-2xl bg-slate-950 border border-cyan-500/40 shadow-2xl p-2.5 z-50 space-y-2.5">
                   
                   {/* Option to Disconnect / Clear Active JD */}
                   {isJDConnected ? (
@@ -205,42 +217,127 @@ export const Header: React.FC<HeaderProps> = ({
                     </div>
                   )}
 
-                  <div className="px-3 py-1 border-b border-white/10 text-[10px] uppercase font-bold text-slate-400 font-mono flex items-center justify-between">
-                    <span>Available Role Presets</span>
-                    <span className="text-cyan-400">{availableRoles.length} Presets</span>
+                  {/* SECTION 1: Your Uploaded & Custom JDs */}
+                  <div className="space-y-1">
+                    <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-emerald-400 font-mono flex items-center justify-between bg-emerald-950/30 border border-emerald-500/30 rounded-lg">
+                      <span className="flex items-center space-x-1.5">
+                        <FileText className="w-3 h-3 text-emerald-400" />
+                        <span>Your Uploaded & Custom JDs</span>
+                      </span>
+                      <span className="text-emerald-300 font-bold text-[9px] px-1.5 py-0.5 bg-emerald-500/20 rounded">
+                        {customRoles.length} {customRoles.length === 1 ? 'Role' : 'Roles'}
+                      </span>
+                    </div>
+
+                    {customRoles.length > 0 ? (
+                      <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                        {customRoles.map((r) => {
+                          const isSelected = isJDConnected && currentRoleId === r.id;
+                          return (
+                            <div
+                              key={r.id}
+                              className={`w-full p-2 rounded-xl text-left transition flex items-center justify-between group ${
+                                isSelected
+                                  ? 'bg-emerald-950/50 text-emerald-300 border border-emerald-400/40'
+                                  : 'hover:bg-slate-900 text-slate-200'
+                              }`}
+                            >
+                              <div
+                                onClick={() => {
+                                  onSelectRole(r.id);
+                                  setRoleDropdownOpen(false);
+                                }}
+                                className="flex flex-col space-y-0.5 min-w-0 flex-1 pr-2 cursor-pointer"
+                              >
+                                <div className="flex items-center space-x-1.5">
+                                  <span className="text-xs font-bold truncate">{r.title}</span>
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono shrink-0">
+                                    Uploaded
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 truncate">
+                                  {r.department} • {r.requirements.length} Skills
+                                </span>
+                              </div>
+
+                              <div className="flex items-center space-x-1 shrink-0">
+                                {isSelected && (
+                                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold">
+                                    Active
+                                  </span>
+                                )}
+                                {onDeleteRole && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onDeleteRole(r.id);
+                                    }}
+                                    className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
+                                    title={`Delete ${r.title}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-2 text-[11px] text-slate-500 italic bg-slate-900/30 rounded-lg text-center">
+                        No uploaded JDs yet. Click "Upload JD" below to add!
+                      </div>
+                    )}
                   </div>
 
-                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
-                    {availableRoles.map((r) => {
-                      const isSelected = isJDConnected && currentRoleId === r.id;
-                      return (
-                        <div
-                          key={r.id}
-                          onClick={() => {
-                            onSelectRole(r.id);
-                            setRoleDropdownOpen(false);
-                          }}
-                          className={`w-full p-2.5 rounded-xl text-left transition cursor-pointer flex items-center justify-between group ${
-                            isSelected
-                              ? 'bg-cyan-950/50 text-cyan-300 border border-cyan-400/30'
-                              : 'hover:bg-slate-900 text-slate-200'
-                          }`}
-                        >
-                          <div className="flex flex-col space-y-0.5 min-w-0 flex-1 pr-2">
-                            <span className="text-xs font-bold truncate">{r.title}</span>
-                            <span className="text-[10px] text-slate-400 truncate">
-                              {r.department} • {r.requirements.length} Skills
-                            </span>
-                          </div>
+                  {/* SECTION 2: System Preset Roles (Protected) */}
+                  <div className="space-y-1 pt-1 border-t border-white/10">
+                    <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-slate-400 font-mono flex items-center justify-between">
+                      <span className="flex items-center space-x-1.5">
+                        <Layers className="w-3 h-3 text-cyan-400" />
+                        <span>System Preset Roles</span>
+                      </span>
+                      <span className="text-cyan-400 font-mono text-[9px]">{presetRoles.length} Presets</span>
+                    </div>
 
-                          {isSelected && (
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-semibold shrink-0">
-                              Connected
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
+                    <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                      {presetRoles.map((r) => {
+                        const isSelected = isJDConnected && currentRoleId === r.id;
+                        return (
+                          <div
+                            key={r.id}
+                            onClick={() => {
+                              onSelectRole(r.id);
+                              setRoleDropdownOpen(false);
+                            }}
+                            className={`w-full p-2 rounded-xl text-left transition cursor-pointer flex items-center justify-between group ${
+                              isSelected
+                                ? 'bg-cyan-950/50 text-cyan-300 border border-cyan-400/30'
+                                : 'hover:bg-slate-900 text-slate-200'
+                            }`}
+                          >
+                            <div className="flex flex-col space-y-0.5 min-w-0 flex-1 pr-2">
+                              <div className="flex items-center space-x-1.5">
+                                <span className="text-xs font-bold truncate">{r.title}</span>
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-400 font-mono shrink-0">
+                                  Preset
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 truncate">
+                                {r.department} • {r.requirements.length} Skills
+                              </span>
+                            </div>
+
+                            {isSelected && (
+                              <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-semibold shrink-0">
+                                Active
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   {/* Active JD Role Actions inside Dropdown */}

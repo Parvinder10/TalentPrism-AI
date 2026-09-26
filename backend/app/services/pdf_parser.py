@@ -41,6 +41,39 @@ class PDFResumeParser:
                 "sections": {}
             }
 
+    def extract_text_from_docx_bytes(self, docx_bytes: bytes) -> Dict[str, Any]:
+        """Extract text and structure from Word .docx bytes using standard library."""
+        try:
+            import zipfile
+            import xml.etree.ElementTree as ET
+            with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
+                xml_content = zf.read("word/document.xml")
+                tree = ET.fromstring(xml_content)
+                paragraphs = []
+                for elem in tree.iter():
+                    if elem.tag.endswith("}p") or elem.tag == "p":
+                        p_text = "".join(node.text for node in elem.iter() if node.text).strip()
+                        if p_text:
+                            paragraphs.append(p_text)
+                combined_text = "\n\n".join(paragraphs)
+                sections = self._segment_sections(combined_text)
+                return {
+                    "success": True,
+                    "num_pages": 1,
+                    "text": combined_text,
+                    "pages": [combined_text],
+                    "sections": sections,
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "text": "",
+                "num_pages": 0,
+                "sections": {},
+            }
+
+
     def _segment_sections(self, text: str) -> Dict[str, str]:
         """Identify standard resume sections: Experience, Education, Skills, Projects, Certifications."""
         section_headers = [

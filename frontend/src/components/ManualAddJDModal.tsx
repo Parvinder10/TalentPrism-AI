@@ -210,10 +210,35 @@ export const ManualAddJDModal: React.FC<ManualAddJDModalProps> = ({
   };
 
   // --- FILE HANDLING & EXTRACTION ---
+  const triggerFileExtraction = async (file: File) => {
+    setSelectedFile(file);
+    setExtractError(null);
+    try {
+      setIsExtracting(true);
+      const res = await api.uploadJD(file);
+      if (res && res.success) {
+        setTitle(res.title || file.name.replace(/\.[^/.]+$/, '').replace(/[_\-]+/g, ' '));
+        setDepartment(res.department || 'Core Engineering & Technology');
+        setDescription(res.description || '');
+        if (res.requirements && res.requirements.length > 0) {
+          setRequirements(res.requirements);
+        }
+        setHasExtracted(true);
+      } else {
+        setExtractError(res.error || 'Failed to extract requirements from JD document.');
+      }
+    } catch (err) {
+      console.error('JD upload error:', err);
+      setExtractError('Failed to process JD document. Please try pasting the JD text directly.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
-      setExtractError(null);
+      const file = e.target.files[0];
+      triggerFileExtraction(file);
     }
   };
 
@@ -221,8 +246,8 @@ export const ManualAddJDModal: React.FC<ManualAddJDModalProps> = ({
     e.preventDefault();
     setDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setSelectedFile(e.dataTransfer.files[0]);
-      setExtractError(null);
+      const file = e.dataTransfer.files[0];
+      triggerFileExtraction(file);
     }
   };
 
@@ -233,26 +258,7 @@ export const ManualAddJDModal: React.FC<ManualAddJDModalProps> = ({
         setExtractError('Please select or drop a JD document file first.');
         return;
       }
-      try {
-        setIsExtracting(true);
-        const res = await api.uploadJD(selectedFile);
-        if (res && res.success) {
-          setTitle(res.title || selectedFile.name.replace(/\.[^/.]+$/, '').replace(/[_\-]+/g, ' '));
-          setDepartment(res.department || 'Core Engineering & Technology');
-          setDescription(res.description || '');
-          if (res.requirements && res.requirements.length > 0) {
-            setRequirements(res.requirements);
-          }
-          setHasExtracted(true);
-        } else {
-          setExtractError(res.error || 'Failed to extract requirements from JD document.');
-        }
-      } catch (err) {
-        console.error('JD upload error:', err);
-        setExtractError('Failed to process JD document. Please try pasting the JD text directly.');
-      } finally {
-        setIsExtracting(false);
-      }
+      await triggerFileExtraction(selectedFile);
     } else {
       if (!pastedText.trim()) {
         setExtractError('Please paste JD text into the box above.');
@@ -767,16 +773,21 @@ export const ManualAddJDModal: React.FC<ManualAddJDModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-white/10">
-          <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={activateImmediately}
-              onChange={(e) => setActivateImmediately(e.target.checked)}
-              className="rounded bg-slate-900 border-white/20 text-cyan-500 focus:ring-0 cursor-pointer w-4 h-4"
-            />
-            <span>Set as Active Role immediately (re-ranks candidates)</span>
-          </label>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-3 border-t border-white/10">
+          <div className="flex flex-col space-y-0.5">
+            <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={activateImmediately}
+                onChange={(e) => setActivateImmediately(e.target.checked)}
+                className="rounded bg-slate-900 border-white/20 text-cyan-500 focus:ring-0 cursor-pointer w-4 h-4"
+              />
+              <span>Set as Active Role immediately (re-ranks candidates)</span>
+            </label>
+            <span className="text-[10px] text-emerald-400/90 pl-6 font-mono">
+              Saved under "Your Uploaded & Custom JDs" (separate from system presets)
+            </span>
+          </div>
 
           <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
             <button

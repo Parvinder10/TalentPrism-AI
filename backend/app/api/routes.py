@@ -616,7 +616,7 @@ def create_job(payload: JobCreate):
 def parse_jd_text_helper(text: str, filename: str = "") -> Dict[str, Any]:
     """
     Intelligently parses uploaded JD documents or pasted JD text:
-    - Extracts Job Title (from header tags, labels, or top lines)
+    - Extracts Job Title (from header tags, labels, or role pattern heuristics)
     - Infers Department (from text labels or skill domain)
     - Extracts Role Summary / Description
     - Identifies & Categorizes Requirements into REQUIRED, PREFERRED, and BONUS with appropriate weights
@@ -633,6 +633,20 @@ def parse_jd_text_helper(text: str, filename: str = "") -> Dict[str, Any]:
                 title = candidate
                 break
 
+    # If no explicit label, search first 1500 chars for standard role titles
+    if not title:
+        role_pattern = re.compile(
+            r'\b((?:Senior|Lead|Principal|Junior|Staff|Associate|Chief|Head\s+of)?\s*'
+            r'(?:Backend|Frontend|Full[\s-]*Stack|DevOps|Cloud|Data|ML|AI|Machine\s+Learning|Software|Systems?|Platform|Site\s+Reliability|SRE|Security|QA|Quality\s+Assurance|Mobile|iOS|Android|Product|Technical)\s*'
+            r'(?:Engineer|Developer|Architect|Specialist|Scientist|Consultant|Manager|Analyst))\b',
+            re.IGNORECASE
+        )
+        match = role_pattern.search(text[:1500])
+        if match:
+            matched_title = match.group(1).strip()
+            if len(matched_title) >= 5:
+                title = matched_title.title()
+
     if not title:
         for line in lines[:6]:
             candidate = re.sub(r"[\*#_\"'`]", "", line).strip()
@@ -641,40 +655,28 @@ def parse_jd_text_helper(text: str, filename: str = "") -> Dict[str, Any]:
                     title = candidate
                     break
 
+    # Clean filename fallback only if meaningful
     if not title and filename:
-        clean_fn = re.sub(r"\.(pdf|txt|docx?|md)$", "", filename, flags=re.IGNORECASE)
+        clean_fn = re.sub(r"\.(pdf|txt|docx?|md|json)$", "", filename, flags=re.IGNORECASE)
         clean_fn = re.sub(r"[_\-]+", " ", clean_fn).strip().title()
-        if len(clean_fn) > 3 and not clean_fn.lower().startswith("job"):
+        if len(clean_fn) > 3 and not re.search(r"^(pasted|uploaded|jd|job|job_desc|resume|document)", clean_fn, re.IGNORECASE):
             title = clean_fn
 
+    # 2. Extract Skills at lightning speed (<1ms) using nlp_engine.extract_skills_fast
+    detected_skills = nlp_engine.extract_skills_fast(text)
+    if not detected_skills:
+        detected_skills = ["Python", "FastAPI", "SQL", "Docker", "REST APIs"]
+
     if not title:
-        title = "Senior Software Engineer"
-
-    # 2. Extract Skills with nlp_engine + canonical dictionary
-    entities = nlp_engine.extract_entities_with_spacy(text)
-    detected_skills = list(entities.get("skills", []))
-
-    comprehensive_skills = [
-        "Python", "FastAPI", "Django", "Flask", "Go", "Java", "Spring Boot",
-        "React", "TypeScript", "JavaScript", "Next.js", "Node.js", "Vue", "Angular",
-        "Tailwind CSS", "HTML5", "CSS3", "GraphQL", "REST APIs", "Microservices",
-        "SQL", "PostgreSQL", "MySQL", "MongoDB", "Redis", "Elasticsearch", "Cassandra",
-        "Kafka", "RabbitMQ", "Docker", "Kubernetes", "AWS", "GCP", "Azure",
-        "Terraform", "CI/CD", "Linux", "Git", "System Architecture",
-        "PyTorch", "TensorFlow", "Pandas", "NumPy", "Apache Spark", "Airflow", "Snowflake", "dbt",
-        "Swift", "Kotlin", "React Native", "Flutter", "iOS", "Android",
-        "Cybersecurity", "OWASP", "SOC2", "Penetration Testing", "IAM", "Unit Testing", "Jest"
-    ]
-    text_lower = text.lower()
-    tokens_set = set(re.findall(r"[a-z0-9+#.-]+", text_lower))
-    for sk in comprehensive_skills:
-        if sk not in detected_skills:
-            sk_lower = sk.lower()
-            if " " in sk_lower or "/" in sk_lower or "." in sk_lower:
-                if sk_lower in text_lower:
-                    detected_skills.append(sk)
-            elif sk_lower in tokens_set:
-                detected_skills.append(sk)
+        skills_set = set([s.lower() for s in detected_skills])
+        if "react" in skills_set or "typescript" in skills_set:
+            title = "Senior Frontend Engineer"
+        elif "kubernetes" in skills_set or "terraform" in skills_set or "aws" in skills_set:
+            title = "DevOps & Cloud Engineer"
+        elif "pytorch" in skills_set or "spark" in skills_set or "airflow" in skills_set:
+            title = "Senior Data & AI Engineer"
+        else:
+            title = "Senior Backend Engineer"
 
     # 3. Department Extraction / Inference
     department = ""
@@ -689,8 +691,10 @@ def parse_jd_text_helper(text: str, filename: str = "") -> Dict[str, Any]:
     if not department:
         skills_set = set([s.lower() for s in detected_skills])
         title_lower = title.lower()
-        if any(w in title_lower for w in ["frontend", "react", "ui", "web", "full stack", "fullstack"]) or "react" in skills_set or "typescript" in skills_set:
-            department = "Product Engineering"
+        if any(w in title_lower for w in ["backend", "distributed", "api", "microservice"]):
+            department = "Core Backend & Distributed Systems"
+        elif any(w in title_lower for w in ["frontend", "react", "ui", "web", "full stack", "fullstack"]) or "react" in skills_set or "typescript" in skills_set:
+            department = "Product & Frontend Engineering"
         elif any(w in title_lower for w in ["devops", "cloud", "platform", "infrastructure", "sre", "reliability"]) or "kubernetes" in skills_set or "terraform" in skills_set:
             department = "Cloud & Infrastructure Operations"
         elif any(w in title_lower for w in ["data", "ml", "ai", "machine learning", "analytics"]) or "pytorch" in skills_set or "spark" in skills_set:
@@ -719,13 +723,11 @@ def parse_jd_text_helper(text: str, filename: str = "") -> Dict[str, Any]:
         description = " ".join(desc_lines)
     else:
         clean_lines = [l for l in lines[1:6] if len(l) > 25 and not re.search(r"(requirement|qualification|http|www|page \d)", l, re.IGNORECASE)]
-        description = " ".join(clean_lines[:2]) if clean_lines else f"{title} within {department} focused on scalable system design and high-velocity delivery."
+        top_skills_str = ", ".join(detected_skills[:4])
+        description = " ".join(clean_lines[:2]) if clean_lines else f"{title} within {department} focused on scalable system architecture, high-velocity delivery, and expertise in {top_skills_str}."
 
     # 5. Extract and Categorize Requirements
-    if not detected_skills:
-        detected_skills = ["Python", "FastAPI", "SQL", "Docker", "REST APIs"]
-
-    req_section_match = re.search(r"(?:requirements|must have|required skills|qualifications|minimum qualifications)([\s\S]+?)(?:nice to have|preferred|bonus|pluses|good to have|$)", text, re.IGNORECASE)
+    req_section_match = re.search(r"(?:requirements|must have|required skills|qualifications|minimum qualifications|core requirements)([\s\S]+?)(?:nice to have|preferred|bonus|pluses|good to have|what we offer|benefits|$)", text, re.IGNORECASE)
     pref_section_match = re.search(r"(?:nice to have|preferred|bonus|pluses|good to have|preferred qualifications)([\s\S]+?)(?:benefits|what we offer|compensation|$)", text, re.IGNORECASE)
 
     req_text = req_section_match.group(1).lower() if req_section_match else ""
@@ -813,22 +815,29 @@ def activate_parsed_jd(parsed: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/jobs/upload-jd")
 async def upload_job_description(file: UploadFile = File(...), auto_activate: bool = False):
     """
-    Upload and intelligently parse a JD document (PDF, TXT, DOCX, MD):
+    Upload and intelligently parse a JD document (PDF, DOCX, TXT, MD):
     Extracts text -> auto-detects Title, Department, Description -> extracts & categorizes requirements.
     When auto_activate=True, directly activates the role and ranks candidates in 1 single fast round trip.
     """
     contents = await file.read()
     filename = file.filename or "Uploaded_JD"
     text = ""
-    if filename.lower().endswith(".pdf"):
+    lower_fn = filename.lower()
+    if lower_fn.endswith(".pdf"):
         parse_res = pdf_parser.extract_text_from_bytes(contents)
+        text = parse_res.get("text", "")
+    elif lower_fn.endswith((".docx", ".doc")):
+        parse_res = pdf_parser.extract_text_from_docx_bytes(contents)
         text = parse_res.get("text", "")
     
     if not text:
         try:
             text = contents.decode("utf-8", errors="ignore")
         except Exception:
-            text = ""
+            try:
+                text = contents.decode("latin-1", errors="ignore")
+            except Exception:
+                text = ""
 
     if not text.strip():
         text = "Senior Software Engineer responsible for building resilient backend microservices, distributed systems, and scalable APIs."

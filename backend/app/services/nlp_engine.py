@@ -1,23 +1,23 @@
 import re
 from typing import Dict, List, Any, Optional, Tuple
-try:
-    import spacy
-except ImportError:
-    spacy = None
 import numpy as np
 from langdetect import detect, DetectorFactory
 
 # Enforce deterministic language detection
 DetectorFactory.seed = 0
 
-# Canonical skill aliases database
+# Canonical skill aliases database with high-coverage modern engineering skills
 CANONICAL_SKILLS = {
     "Python": ["python", "python3", "py", "python 3", "python 3.x", "asyncio"],
     "FastAPI": ["fastapi", "fast api", "fast-api", "starlette", "pydantic"],
     "SQL": ["sql", "postgresql", "postgres", "mysql", "sqlite", "relational database", "rdbms", "database queries", "complex sql"],
+    "PostgreSQL": ["postgresql", "postgres", "psql"],
+    "MySQL": ["mysql", "mariadb"],
     "REST APIs": ["rest api", "rest apis", "restful", "restful apis", "restful web services", "crud endpoints", "api development", "http apis", "microservices endpoints"],
     "Docker": ["docker", "containerization", "containers", "dockerfile", "docker-compose", "docker compose", "containerized applications"],
     "AWS": ["aws", "amazon web services", "ec2", "s3", "ecs", "lambda", "cloudwatch", "iam", "aws cloud"],
+    "Azure": ["azure", "microsoft azure", "azure devops", "blob storage", "aks"],
+    "GCP": ["gcp", "google cloud", "google cloud platform", "bigquery", "cloud run", "gke"],
     "Redis": ["redis", "in-memory cache", "distributed caching", "redis cache", "redis pub/sub", "key-value store"],
     "Kubernetes": ["kubernetes", "k8s", "helm", "k8s cluster", "container orchestration", "pods", "ingress controller"],
     "Kafka": ["kafka", "apache kafka", "event streaming", "kafka consumer", "message broker", "kafka streams"],
@@ -28,12 +28,35 @@ CANONICAL_SKILLS = {
     "GraphQL": ["graphql", "apollo", "schema stitching"],
     "MongoDB": ["mongodb", "nosql", "document store"],
     "Elasticsearch": ["elasticsearch", "elastic search", "opensearch", "elk stack"],
-    "Java": ["java", "spring boot", "spring framework", "jvm"],
+    "Java": ["java", "jvm"],
+    "Spring Boot": ["spring boot", "spring framework", "spring cloud"],
     "Go": ["golang", "go programming", "goroutines"],
     "TypeScript": ["typescript", "ts"],
+    "JavaScript": ["javascript", "js", "ecmascript", "es6"],
     "React": ["react", "react.js", "reactjs", "react hooks"],
+    "Next.js": ["next.js", "nextjs", "next js"],
+    "Node.js": ["node.js", "nodejs", "node js", "express", "express.js"],
+    "Vue": ["vue", "vue.js", "vuejs", "vue3", "nuxt"],
+    "Angular": ["angular", "angularjs"],
     "Microservices": ["microservices", "distributed systems", "event-driven architecture", "service mesh"],
-    "Unit Testing": ["pytest", "unittest", "test driven development", "tdd", "unit tests", "integration testing"],
+    "Unit Testing": ["pytest", "unittest", "test driven development", "tdd", "unit tests", "integration testing", "jest", "cypress", "playwright"],
+    "Terraform": ["terraform", "iac", "infrastructure as code"],
+    "Linux": ["linux", "unix", "bash", "shell scripting", "ubuntu"],
+    "PyTorch": ["pytorch", "torch", "deep learning"],
+    "TensorFlow": ["tensorflow", "tf", "keras"],
+    "Pandas": ["pandas", "dataframe"],
+    "NumPy": ["numpy", "scipy"],
+    "Apache Spark": ["spark", "apache spark", "pyspark"],
+    "Airflow": ["airflow", "apache airflow"],
+    "Snowflake": ["snowflake", "data warehouse"],
+    "dbt": ["dbt", "data build tool"],
+    "Cybersecurity": ["cybersecurity", "infosec", "network security", "application security"],
+    "OWASP": ["owasp", "owasp top 10", "web security"],
+    "SOC2": ["soc2", "soc 2", "compliance", "iso 27001"],
+    "Swift": ["swift", "ios development", "xcode"],
+    "Kotlin": ["kotlin", "android development", "android studio"],
+    "React Native": ["react native", "react-native", "expo"],
+    "Flutter": ["flutter", "dart"],
 }
 
 # Domain relatedness map for semantic bridging
@@ -50,15 +73,28 @@ SKILL_RELATIONS = {
 
 class NLPEngine:
     def __init__(self):
-        self.nlp = None
-        if spacy is not None:
+        self._nlp = None
+        self._nlp_attempted = False
+        self.sentence_transformer = None
+        self._transformer_attempted = False
+
+    def _get_nlp(self):
+        """Lazy-load spaCy on demand to keep imports under 20ms."""
+        if not self._nlp_attempted:
+            self._nlp_attempted = True
             try:
-                self.nlp = spacy.load("en_core_web_sm")
-            except Exception:
+                import spacy
                 try:
-                    self.nlp = spacy.blank("en")
+                    self._nlp = spacy.load("en_core_web_sm")
                 except Exception:
-                    self.nlp = None
+                    try:
+                        self._nlp = spacy.blank("en")
+                    except Exception:
+                        self._nlp = None
+            except Exception:
+                self._nlp = None
+        return self._nlp
+
 
         self.sentence_transformer = None
         self._transformer_attempted = False
@@ -110,6 +146,36 @@ class NLPEngine:
                 return canonical
         return None
 
+    def extract_skills_fast(self, text: str) -> List[str]:
+        """High-speed token & regex boundary matching for comprehensive skills extraction in <1ms."""
+        text_lower = text.lower()
+        tokens_set = set(re.findall(r"\b[a-z0-9+#.-]+\b", text_lower))
+        detected: List[str] = []
+
+        for canonical, aliases in CANONICAL_SKILLS.items():
+            matched = False
+            can_lower = canonical.lower()
+            if " " in can_lower or "/" in can_lower or "." in can_lower or "+" in can_lower or "#" in can_lower:
+                if can_lower in text_lower:
+                    matched = True
+            elif can_lower in tokens_set:
+                matched = True
+
+            if not matched:
+                for alias in aliases:
+                    if " " in alias or "-" in alias or "/" in alias or "." in alias or "+" in alias or "#" in alias:
+                        if alias in text_lower:
+                            matched = True
+                            break
+                    elif alias in tokens_set:
+                        matched = True
+                        break
+
+            if matched and canonical not in detected:
+                detected.append(canonical)
+
+        return detected
+
     def extract_entities_with_spacy(self, text: str) -> Dict[str, List[str]]:
         """Run spaCy NER to extract organizations, dates, persons, and custom entities."""
         entities = {
@@ -121,9 +187,10 @@ class NLPEngine:
             "skills": []
         }
 
-        if self.nlp is not None:
+        nlp = self._get_nlp()
+        if nlp is not None:
             try:
-                doc = self.nlp(text[:6000]) # Limit length for fast response
+                doc = nlp(text[:4000])  # Limit length for fast response
                 for ent in doc.ents:
                     val = ent.text.strip()
                     if ent.label_ == "ORG":
@@ -138,31 +205,7 @@ class NLPEngine:
             except Exception:
                 pass
 
-        # Match canonical skills in text using high-speed O(1) token set lookup
-        text_lower = text.lower()
-        tokens_set = set(re.findall(r"[a-z0-9+#.-]+", text_lower))
-        for canonical, aliases in CANONICAL_SKILLS.items():
-            matched = False
-            can_lower = canonical.lower()
-            if " " in can_lower:
-                if can_lower in text_lower:
-                    matched = True
-            elif can_lower in tokens_set:
-                matched = True
-
-            if not matched:
-                for alias in aliases:
-                    if " " in alias or "-" in alias:
-                        if alias in text_lower:
-                            matched = True
-                            break
-                    elif alias in tokens_set:
-                        matched = True
-                        break
-
-            if matched and canonical not in entities["skills"]:
-                entities["skills"].append(canonical)
-
+        entities["skills"] = self.extract_skills_fast(text)
         return entities
 
     def compute_semantic_similarity(self, text_a: str, text_b: str) -> float:

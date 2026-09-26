@@ -17,7 +17,7 @@ import { DemoTourModal } from './components/DemoTourModal';
 import { ManualAddJDModal } from './components/ManualAddJDModal';
 import { api } from './api/client';
 import { RankedCandidate, JobRequirement, JobRole, User } from './types';
-import { storage } from './utils/storage';
+import { storage, PROTECTED_PRESET_IDS } from './utils/storage';
 
 export function App() {
   // Authentication State - default to null so login page is always the very first page
@@ -314,6 +314,11 @@ export function App() {
   };
 
   const handleDeleteRole = async (roleIdToDelete: string) => {
+    if (PROTECTED_PRESET_IDS.has(roleIdToDelete)) {
+      alert('Default system preset roles cannot be removed.');
+      return;
+    }
+
     if (availableRoles.length <= 1) {
       alert('Cannot remove the only remaining Job Description role. At least one JD role must remain.');
       return;
@@ -425,6 +430,7 @@ export function App() {
         onOpenManualAddJD={handleOpenManualAddJD}
         onResetDemoData={handleResetDemoData}
         onDisconnectJD={handleDisconnectJD}
+        onDeleteRole={handleDeleteRole}
       />
 
       {/* Main Container */}
