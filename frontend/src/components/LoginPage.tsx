@@ -32,7 +32,7 @@ interface LoginPageProps {
 export const MASTER_ADMIN_KEY = 'PrismAdmin@2025';
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
-  // Mode: 'signin' for existing or direct admin key login, 'register' for new user creation
+  // Mode: 'signin' for registered admin sign in, 'register' for new admin setup
   const [authMode, setAuthMode] = useState<'signin' | 'register'>('signin');
 
   // Sign In State
@@ -69,8 +69,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
   const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginEmail.trim() || !loginPassword.trim()) {
-      setErrorMessage('Please enter both your corporate email/ID and password or admin key.');
+    const cleanId = loginEmail.trim();
+    if (!cleanId || !loginPassword.trim()) {
+      setErrorMessage('Please enter both your registered User ID / Name and password.');
       return;
     }
 
@@ -78,10 +79,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
+    // Look up local backup for serverless persistence
+    let localBackup: any = null;
+    try {
+      const stored = JSON.parse(localStorage.getItem('talentprism_registered_users') || '[]');
+      localBackup = stored.find(
+        (u: any) =>
+          u.email?.toLowerCase() === cleanId.toLowerCase() ||
+          u.name?.toLowerCase() === cleanId.toLowerCase()
+      );
+    } catch {
+      // ignore
+    }
+
     try {
       const res = await api.login({
-        email: loginEmail.trim(),
+        email: cleanId,
         password: loginPassword.trim(),
+        registered_user_backup: localBackup || undefined,
       });
 
       if (res && res.user) {
@@ -95,7 +110,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     } catch (err: any) {
       setErrorMessage(
         err?.message ||
-          'Authentication failed. Please verify your credentials or use the Enterprise Admin Key (PrismAdmin@2025).'
+          'Account not found. Random IDs cannot sign in. Please register in the New User section first.'
       );
     } finally {
       setIsLoading(false);
@@ -129,13 +144,38 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       });
 
       if (res && res.user) {
+        // Cache registered user in localStorage for serverless instant recognition
+        try {
+          const stored = JSON.parse(localStorage.getItem('talentprism_registered_users') || '[]');
+          const record = {
+            name: regName.trim(),
+            email: regEmail.trim(),
+            password: regPassword.trim(),
+            role: regRole.trim() || 'Talent Acquisition Admin',
+            organization: regCompany.trim() || 'Enterprise Organization',
+          };
+          const cleanEmail = regEmail.trim().toLowerCase();
+          const cleanName = regName.trim().toLowerCase();
+          const idx = stored.findIndex(
+            (u: any) => u.email?.toLowerCase() === cleanEmail || u.name?.toLowerCase() === cleanName
+          );
+          if (idx >= 0) {
+            stored[idx] = record;
+          } else {
+            stored.push(record);
+          }
+          localStorage.setItem('talentprism_registered_users', JSON.stringify(stored));
+        } catch {
+          // ignore
+        }
+
         if (res.access_token) {
           localStorage.setItem('talentprism_jwt_token', res.access_token);
         }
         setSuccessMessage('Admin account provisioned successfully! Launching workspace...');
         setTimeout(() => {
           onLogin(res.user);
-        }, 600);
+        }, 500);
       } else {
         throw new Error('Registration completed but user profile was not returned.');
       }
@@ -216,8 +256,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
                 {authMode === 'signin'
-                  ? 'Access your candidate intelligence workspace with your ID or Admin Key.'
-                  : 'Provision a new corporate administrator account with the master passkey.'}
+                  ? 'Access your workspace with your registered ID or Admin Key.'
+                  : 'Register a new administrator profile with the master passkey.'}
               </p>
             </div>
 
@@ -260,7 +300,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-cyan-300 flex items-center space-x-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Master Admin Password Key</span>
+                  <span>Master Admin Passkey</span>
                 </span>
                 <button
                   type="button"
@@ -286,7 +326,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 )}
               </div>
               <p className="text-[10px] text-slate-400 leading-tight">
-                Any administrator can log in with their own email or ID using this key, or use it to authorize new corporate accounts.
+                Required to provision new administrator accounts, or sign in to your registered ID. Unregistered random IDs cannot log in.
               </p>
             </div>
 
@@ -295,7 +335,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/50 flex items-start space-x-2.5 animate-fadeIn">
                 <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-rose-200 space-y-1">
-                  <p className="font-semibold text-rose-300">Access Notice</p>
+                  <p className="font-semibold text-rose-300">Access Restricted</p>
                   <p className="text-[11px] text-rose-200/90 leading-relaxed">{errorMessage}</p>
                 </div>
               </div>
@@ -316,7 +356,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-300 flex items-center space-x-1">
                     <Mail className="w-3 h-3 text-cyan-400" />
-                    <span>Corporate Email / Admin ID</span>
+                    <span>Registered User ID / Corporate Email</span>
                   </label>
                   <input
                     type="text"
@@ -327,9 +367,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                       setLoginEmail(e.target.value);
                       setErrorMessage(null);
                     }}
-                    placeholder="e.g. admin@company.com or your_id"
+                    placeholder="Enter your registered ID or Name"
                     className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500"
                   />
+                  <p className="text-[10px] text-slate-500">
+                    Must be the same ID or Name provided when creating your account.
+                  </p>
                 </div>
 
                 <div className="space-y-1">
@@ -387,7 +430,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                     onClick={() => setAuthMode('register')}
                     className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer"
                   >
-                    Need new account? Register →
+                    Need an account? Register →
                   </button>
                 </div>
 
@@ -404,7 +447,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                     </>
                   ) : (
                     <>
-                      <span>Launch Admin Workspace</span>
+                      <span>Sign In with Registered ID</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </>
                   )}
@@ -416,7 +459,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-300 flex items-center space-x-1">
                     <UserIcon className="w-3 h-3 text-cyan-400" />
-                    <span>Full Name</span>
+                    <span>Full Name / Admin Name</span>
                   </label>
                   <input
                     type="text"
@@ -435,7 +478,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-300 flex items-center space-x-1">
                     <Mail className="w-3 h-3 text-cyan-400" />
-                    <span>Corporate Email / Admin ID</span>
+                    <span>New User ID / Corporate Email</span>
                   </label>
                   <input
                     type="text"
@@ -446,9 +489,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                       setRegEmail(e.target.value);
                       setErrorMessage(null);
                     }}
-                    placeholder="e.g. yourname@company.com"
+                    placeholder="e.g. your_admin_id or name@company.com"
                     className="w-full px-3 py-1.5 bg-slate-900 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500"
                   />
+                  <p className="text-[10px] text-slate-500">
+                    This will be the ID you use when logging into TalentPrism.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -563,7 +609,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                     onClick={() => setAuthMode('signin')}
                     className="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer"
                   >
-                    Already have an account or key? Sign in directly →
+                    Already have an account? Sign in directly →
                   </button>
                 </div>
               </form>
@@ -671,8 +717,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               <span className="text-[10px] font-mono text-cyan-400">Admin Control</span>
             </div>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              Every administrator can sign in directly with their corporate email or ID using the master passkey{' '}
-              <code className="text-cyan-300 font-mono font-semibold">{MASTER_ADMIN_KEY}</code>, or create their own custom credentials under the New User section.
+              Every administrator must first register their account using the master passkey{' '}
+              <code className="text-cyan-300 font-mono font-semibold">{MASTER_ADMIN_KEY}</code>. Once registered, sign in using your exact User ID or Name. Arbitrary unregistered IDs cannot gain access.
             </p>
           </div>
         </div>

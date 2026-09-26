@@ -29,7 +29,14 @@ export const api = {
     return handleResponse(res);
   },
 
-  login: async (credentials: { name?: string; email?: string; role?: string; organization?: string; password?: string }) => {
+  login: async (credentials: {
+    name?: string;
+    email?: string;
+    role?: string;
+    organization?: string;
+    password?: string;
+    registered_user_backup?: any;
+  }) => {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

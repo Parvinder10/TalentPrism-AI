@@ -177,12 +177,47 @@ def get_admin_key_info():
         "description": "Enterprise Master Admin Passkey: Any administrator can log in or register with their corporate ID using this key."
     }
 
+def find_user_record(identifier: str, client_backup: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """
+    Finds a registered or authorized user by email, name, or User ID.
+    If not found in server memory but client provides valid backup from registration, restores it.
+    """
+    clean_id = identifier.strip().lower()
+
+    # 1. Direct match in registered_users (by email or registered name)
+    if clean_id in registered_users:
+        return registered_users[clean_id]
+
+    # 2. Loop across registered_users values
+    for rec in registered_users.values():
+        if rec.get("email", "").lower() == clean_id or rec.get("name", "").lower() == clean_id:
+            return rec
+
+    # 3. Direct or name match in pre-seeded AUTHORIZED_USERS
+    if clean_id in AUTHORIZED_USERS:
+        return AUTHORIZED_USERS[clean_id]
+    for rec in AUTHORIZED_USERS.values():
+        if rec.get("email", "").lower() == clean_id or rec.get("name", "").lower() == clean_id:
+            return rec
+
+    # 4. Check client backup (restores newly registered users across serverless cold starts)
+    if client_backup and isinstance(client_backup, dict):
+        b_email = str(client_backup.get("email", "")).strip().lower()
+        b_name = str(client_backup.get("name", "")).strip().lower()
+        if (b_email == clean_id or b_name == clean_id) and client_backup.get("password"):
+            registered_users[b_email] = client_backup
+            registered_users[b_name] = client_backup
+            return client_backup
+
+    return None
+
 @router.post("/auth/login")
 def login(payload: Dict[str, Any] = Body(...)):
-    email = str(payload.get("email", "")).strip().lower()
+    identifier = str(payload.get("email", "")).strip()
     password = str(payload.get("password", "")).strip()
+    client_backup = payload.get("registered_user_backup")
 
-    if not email:
+    if not identifier:
         raise HTTPException(
             status_code=400,
             detail="Corporate email or Admin ID is required to access TalentPrism AI."
@@ -190,89 +225,45 @@ def login(payload: Dict[str, Any] = Body(...)):
     if not password:
         raise HTTPException(
             status_code=400,
-            detail="Password or Admin Key is required. Please enter your credentials or the Enterprise Admin Key (PrismAdmin@2025)."
+            detail="Password or Admin Key is required."
         )
 
-    # 1. Master Admin Key Access: Grants immediate authenticated access to ANY admin ID!
-    if password in VALID_ADMIN_KEYS:
-        # Check if already registered
-        user_record = registered_users.get(email) or AUTHORIZED_USERS.get(email)
-        if not user_record:
-            # Auto-provision new admin profile from the submitted email/ID
-            inferred_name = payload.get("name") or extract_name_from_email(email)
-            inferred_org = payload.get("organization") or extract_company_from_email(email)
-            inferred_role = payload.get("role") or "Lead Talent Acquisition Admin"
-            initials = "".join([w[0].upper() for w in inferred_name.split()][:2]) or "AD"
+    # 1. STRICT VERIFICATION: The ID/Name MUST belong to an already registered user!
+    user_record = find_user_record(identifier, client_backup)
 
-            user_record = {
-                "name": inferred_name,
-                "email": email,
-                "role": inferred_role,
-                "organization": inferred_org,
-                "badge": "Enterprise Admin",
-                "avatar": initials,
-                "department": "Talent Intelligence & Acquisition",
-                "is_admin": True,
-                "password": password
-            }
-            registered_users[email] = user_record
+    if not user_record:
+        # STRICT REJECTION: Random IDs cannot log in, even if they provide the admin key!
+        raise HTTPException(
+            status_code=401,
+            detail=f"Account not found for '{identifier}'. You must register this User ID in the 'New User Access' section first using the Admin Key."
+        )
 
-        session_token = f"prism_token_{hashlib.sha256(f'{email}:{password}:talentprism_salt'.encode()).hexdigest()[:24]}"
-        return {
-            "access_token": session_token,
-            "token_type": "bearer",
-            "user": {
-                "name": user_record["name"],
-                "email": email,
-                "role": user_record.get("role", "Lead Talent Acquisition Admin"),
-                "organization": user_record.get("organization", "Enterprise Organization"),
-                "badge": user_record.get("badge", "Enterprise Admin"),
-                "avatar": user_record.get("avatar", "AD"),
-                "department": user_record.get("department", "Talent Intelligence")
-            }
+    # 2. Check password or Admin Key for this registered account
+    is_admin_key_match = password in VALID_ADMIN_KEYS
+    is_custom_password_match = user_record.get("password") == password
+
+    if not (is_admin_key_match or is_custom_password_match):
+        raise HTTPException(
+            status_code=401,
+            detail="Access Denied: Incorrect password. Please enter the password you created during registration or the Enterprise Admin Key."
+        )
+
+    user_email = user_record.get("email", identifier.lower())
+    session_token = f"prism_token_{hashlib.sha256(f'{user_email}:{password}:talentprism_salt'.encode()).hexdigest()[:24]}"
+
+    return {
+        "access_token": session_token,
+        "token_type": "bearer",
+        "user": {
+            "name": user_record["name"],
+            "email": user_record.get("email", identifier.lower()),
+            "role": user_record.get("role", "Lead Talent Acquisition Admin"),
+            "organization": user_record.get("organization", "Enterprise Organization"),
+            "badge": user_record.get("badge", "Enterprise Admin"),
+            "avatar": user_record.get("avatar", "AD"),
+            "department": user_record.get("department", "Talent Intelligence & Acquisition")
         }
-
-    # 2. Check registered users (with custom password created during registration)
-    if email in registered_users and registered_users[email].get("password") == password:
-        user_record = registered_users[email]
-        session_token = f"prism_token_{hashlib.sha256(f'{email}:{password}:talentprism_salt'.encode()).hexdigest()[:24]}"
-        return {
-            "access_token": session_token,
-            "token_type": "bearer",
-            "user": {
-                "name": user_record["name"],
-                "email": email,
-                "role": user_record["role"],
-                "organization": user_record["organization"],
-                "badge": user_record.get("badge", "Enterprise Admin"),
-                "avatar": user_record.get("avatar", "AD"),
-                "department": user_record.get("department", "Talent Intelligence")
-            }
-        }
-
-    # 3. Check pre-seeded accounts
-    if email in AUTHORIZED_USERS and AUTHORIZED_USERS[email].get("password") == password:
-        user_record = AUTHORIZED_USERS[email]
-        session_token = f"prism_token_{hashlib.sha256(f'{email}:{password}:talentprism_salt'.encode()).hexdigest()[:24]}"
-        return {
-            "access_token": session_token,
-            "token_type": "bearer",
-            "user": {
-                "name": user_record["name"],
-                "email": email,
-                "role": user_record["role"],
-                "organization": user_record["organization"],
-                "badge": user_record.get("badge", "Enterprise Partner"),
-                "avatar": user_record.get("avatar", "TP"),
-                "department": user_record.get("department", "Talent Acquisition")
-            }
-        }
-
-    # 4. Access Denied
-    raise HTTPException(
-        status_code=401,
-        detail="Access Denied: Invalid credentials. If you are an administrator, use the Enterprise Admin Key (PrismAdmin@2025) or register a new admin account."
-    )
+    }
 
 @router.post("/auth/register")
 def register_user(payload: Dict[str, Any] = Body(...)):
@@ -311,6 +302,7 @@ def register_user(payload: Dict[str, Any] = Body(...)):
         "is_admin": True
     }
     registered_users[email] = user_record
+    registered_users[name.lower()] = user_record
 
     session_token = f"prism_token_{hashlib.sha256(f'{email}:{password}:talentprism_salt'.encode()).hexdigest()[:24]}"
     return {
