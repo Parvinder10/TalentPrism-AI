@@ -367,6 +367,32 @@ def select_job_role(payload: Dict[str, Any] = Body(...)):
         "ranked_candidates": ranked
     }
 
+@router.delete("/jobs/roles/{role_id}")
+def delete_job_role(role_id: str):
+    """
+    Deletes a Job Role specification from the catalog.
+    If the active job was the deleted role, automatically switches to another available role.
+    """
+    global current_job
+    if len(PRECONFIGURED_ROLES) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the only remaining Job Description role.")
+
+    removed_role = PRECONFIGURED_ROLES.pop(role_id, None)
+
+    if current_job.get("id") == role_id:
+        next_id = next(iter(PRECONFIGURED_ROLES.keys()))
+        current_job = dict(PRECONFIGURED_ROLES[next_id])
+        current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
+        reevaluate_candidates_for_job(current_job["requirements"])
+        refresh_baseline_ranking()
+
+    return {
+        "success": True,
+        "deleted_role_id": role_id,
+        "active_job": current_job,
+        "remaining_roles_count": len(PRECONFIGURED_ROLES)
+    }
+
 @router.post("/sync/state")
 def sync_state(payload: Dict[str, Any] = Body(...)):
     """
@@ -375,11 +401,17 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
     """
     global current_job, candidates_store, current_weights
     
+    # 0. Remove any deleted roles from client
+    deleted_role_ids = payload.get("deleted_role_ids", [])
+    for d_id in deleted_role_ids:
+        if d_id in PRECONFIGURED_ROLES and len(PRECONFIGURED_ROLES) > 1:
+            PRECONFIGURED_ROLES.pop(d_id, None)
+
     # 1. Register any custom roles from client
     custom_roles = payload.get("custom_roles", [])
     for r in custom_roles:
         r_id = r.get("id")
-        if r_id:
+        if r_id and r_id not in deleted_role_ids:
             PRECONFIGURED_ROLES[r_id] = r
             
     # 2. Set active role if specified

@@ -66,9 +66,41 @@ export const storage = {
         roles.push(newRole);
       }
       localStorage.setItem(KEYS.CUSTOM_ROLES, JSON.stringify(roles));
+
+      // If it was previously marked deleted, unmark it
+      const deletedIds = storage.getDeletedRoleIds().filter((id) => id !== newRole.id);
+      localStorage.setItem(`${PREFIX}deleted_role_ids`, JSON.stringify(deletedIds));
     } catch (e) {
       console.error('Failed to save custom role to localStorage', e);
     }
+  },
+
+  // --- Deleted / Removed JD Role IDs ---
+  getDeletedRoleIds(): string[] {
+    try {
+      const data = localStorage.getItem(`${PREFIX}deleted_role_ids`);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  addDeletedRoleId(roleId: string): void {
+    try {
+      const ids = new Set(storage.getDeletedRoleIds());
+      ids.add(roleId);
+      localStorage.setItem(`${PREFIX}deleted_role_ids`, JSON.stringify(Array.from(ids)));
+
+      // Also remove from custom_roles if present
+      const custom = storage.getCustomRoles().filter((r) => r.id !== roleId);
+      localStorage.setItem(KEYS.CUSTOM_ROLES, JSON.stringify(custom));
+    } catch (e) {
+      console.error('Failed to save deleted role ID to localStorage', e);
+    }
+  },
+
+  removeRole(roleId: string): void {
+    storage.addDeletedRoleId(roleId);
   },
 
   // --- Removed / Dismissed Candidate IDs ---

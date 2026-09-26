@@ -40,6 +40,8 @@ interface RecruiterDashboardProps {
   onOpenJDEditor?: () => void;
   onOpenUploadJD?: () => void;
   currentRoleTitle?: string;
+  currentRoleId?: string;
+  onDeleteRole?: (roleId: string) => void;
   onRemoveCandidate?: (candidateId: string, candidateName: string) => void;
 }
 
@@ -52,6 +54,8 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
   onOpenJDEditor,
   onOpenUploadJD,
   currentRoleTitle = 'Senior Backend Engineer',
+  currentRoleId,
+  onDeleteRole,
   onRemoveCandidate,
 }) => {
   const [activeFilter, setActiveFilter] = useState<'all' | 'top_tier' | 'lens_alerts' | 'high_evidence'>('all');
@@ -183,6 +187,16 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
               >
                 <Sliders className="w-4 h-4 text-cyan-400" />
                 <span>Calibrate JD</span>
+              </button>
+            )}
+            {onDeleteRole && currentRoleId && (
+              <button
+                onClick={() => onDeleteRole(currentRoleId)}
+                className="px-3.5 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-bold transition cursor-pointer flex items-center space-x-1.5 shadow-sm"
+                title={`Remove "${currentRoleTitle}" JD role specification`}
+              >
+                <Trash2 className="w-4 h-4 text-rose-400" />
+                <span>Remove JD</span>
               </button>
             )}
             <button

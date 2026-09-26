@@ -20,6 +20,7 @@ interface JDEditorModalProps {
   currentRoleTitle?: string;
   onClose: () => void;
   onRequirementsUpdated: (newReqs: JobRequirement[]) => void;
+  onDeleteRole?: (roleId: string) => void;
 }
 
 export const JDEditorModal: React.FC<JDEditorModalProps> = ({
@@ -28,6 +29,7 @@ export const JDEditorModal: React.FC<JDEditorModalProps> = ({
   currentRoleTitle = 'Senior Backend Engineer',
   onClose,
   onRequirementsUpdated,
+  onDeleteRole,
 }) => {
   const [requirements, setRequirements] = useState<JobRequirement[]>(
     JSON.parse(JSON.stringify(currentRequirements))
@@ -201,12 +203,30 @@ export const JDEditorModal: React.FC<JDEditorModalProps> = ({
               Manually add or remove skills, toggle suggested role criteria, and set priorities.
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-2">
+            {onDeleteRole && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentRoleId) {
+                    onClose();
+                    onDeleteRole(currentRoleId);
+                  }
+                }}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold transition cursor-pointer"
+                title={`Remove "${currentRoleTitle}" JD role specification`}
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span className="hidden sm:inline">Remove This JD</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Section 1: Curated JD Suggestions (Add or Remove chips) */}

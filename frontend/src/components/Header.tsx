@@ -15,6 +15,7 @@ import {
   User as UserIcon,
   Plus,
   RotateCcw,
+  Trash2,
 } from 'lucide-react';
 import { JobRole, User } from '../types';
 
@@ -32,6 +33,7 @@ interface HeaderProps {
   onLogout: () => void;
   onOpenManualAddJD: (mode?: 'upload' | 'manual') => void;
   onResetDemoData?: () => void;
+  onDeleteRole?: (roleId: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenManualAddJD,
   onResetDemoData,
+  onDeleteRole,
 }) => {
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
 
@@ -158,25 +161,45 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
 
                   <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
-                    {availableRoles.map((r) => (
-                      <button
-                        key={r.id}
-                        onClick={() => {
-                          onSelectRole(r.id);
-                          setRoleDropdownOpen(false);
-                        }}
-                        className={`w-full p-2.5 rounded-xl text-left transition cursor-pointer flex flex-col space-y-0.5 ${
-                          currentRoleId === r.id
-                            ? 'bg-cyan-950/50 text-cyan-300 border border-cyan-400/30'
-                            : 'hover:bg-slate-900 text-slate-200'
-                        }`}
-                      >
-                        <span className="text-xs font-bold">{r.title}</span>
-                        <span className="text-[10px] text-slate-400">
-                          {r.department} • {r.requirements.length} Skills
-                        </span>
-                      </button>
-                    ))}
+                    {availableRoles.map((r) => {
+                      const isSelected = currentRoleId === r.id;
+                      const canDelete = availableRoles.length > 1;
+                      return (
+                        <div
+                          key={r.id}
+                          onClick={() => {
+                            onSelectRole(r.id);
+                            setRoleDropdownOpen(false);
+                          }}
+                          className={`w-full p-2.5 rounded-xl text-left transition cursor-pointer flex items-center justify-between group ${
+                            isSelected
+                              ? 'bg-cyan-950/50 text-cyan-300 border border-cyan-400/30'
+                              : 'hover:bg-slate-900 text-slate-200'
+                          }`}
+                        >
+                          <div className="flex flex-col space-y-0.5 min-w-0 flex-1 pr-2">
+                            <span className="text-xs font-bold truncate">{r.title}</span>
+                            <span className="text-[10px] text-slate-400 truncate">
+                              {r.department} • {r.requirements.length} Skills
+                            </span>
+                          </div>
+
+                          {onDeleteRole && canDelete && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteRole(r.id);
+                              }}
+                              className="p-1.5 rounded-lg opacity-60 hover:opacity-100 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 transition cursor-pointer shrink-0"
+                              title={`Remove "${r.title}" JD specification`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Active JD Role Actions inside Dropdown */}

@@ -81,9 +81,17 @@ export const api = {
     return handleResponse(res);
   },
 
+  deleteRole: async (roleId: string) => {
+    const res = await fetch(`${API_BASE}/jobs/roles/${roleId}`, {
+      method: 'DELETE',
+    });
+    return handleResponse(res);
+  },
+
   syncState: async (payload: {
     active_role_id?: string;
     custom_roles?: JobRole[];
+    deleted_role_ids?: string[];
     removed_candidate_ids?: string[];
     custom_requirements?: JobRequirement[];
     scoring_weights?: ScoringWeights;

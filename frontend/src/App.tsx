@@ -92,6 +92,7 @@ export function App() {
     try {
       const storedRoleId = storage.getCurrentRoleId('job_backend_core');
       const customRoles = storage.getCustomRoles();
+      const deletedRoleIds = storage.getDeletedRoleIds();
       const removedIds = storage.getRemovedCandidateIds();
       const calibratedReqs = storage.getCalibratedRequirements(storedRoleId);
       const weights = storage.getScoringWeights();
@@ -100,6 +101,7 @@ export function App() {
       try {
         await api.syncState({
           custom_roles: customRoles,
+          deleted_role_ids: deletedRoleIds,
           active_role_id: storedRoleId,
           removed_candidate_ids: removedIds,
           custom_requirements: calibratedReqs || undefined,
@@ -117,17 +119,28 @@ export function App() {
         api.getRoles(),
       ]);
 
-      // Merge backend roles with custom roles stored in browser
+      // Merge backend roles with custom roles stored in browser, filtering out deleted ones
       const mergedRolesMap = new Map<string, JobRole>();
-      (rolesData || []).forEach((r) => mergedRolesMap.set(r.id, r));
-      customRoles.forEach((r) => mergedRolesMap.set(r.id, r));
+      (rolesData || []).forEach((r) => {
+        if (!deletedRoleIds.includes(r.id)) mergedRolesMap.set(r.id, r);
+      });
+      customRoles.forEach((r) => {
+        if (!deletedRoleIds.includes(r.id)) mergedRolesMap.set(r.id, r);
+      });
       const mergedRoles = Array.from(mergedRolesMap.values());
       setAvailableRoles(mergedRoles);
+
+      // If storedRoleId was deleted, select the first available role
+      let effectiveRoleId = storedRoleId;
+      if (deletedRoleIds.includes(effectiveRoleId) && mergedRoles.length > 0) {
+        effectiveRoleId = mergedRoles[0].id;
+        storage.setCurrentRoleId(effectiveRoleId);
+      }
 
       // Filter out any candidates dismissed by the recruiter
       const filteredCandidates = (candData || []).filter((c) => !removedIds.includes(c.id));
       setCandidates(filteredCandidates);
-      storage.saveCachedCandidates(storedRoleId, filteredCandidates);
+      storage.saveCachedCandidates(effectiveRoleId, filteredCandidates);
 
       // Priority for requirements: calibrated user edits > jobData from API
       if (calibratedReqs && calibratedReqs.length > 0) {
@@ -136,7 +149,7 @@ export function App() {
         setRequirements(jobData.requirements);
       }
 
-      setCurrentRoleId(storedRoleId);
+      setCurrentRoleId(effectiveRoleId);
     } catch (e) {
       console.error('Failed to load initial data:', e);
     } finally {
@@ -254,6 +267,65 @@ export function App() {
     }
   };
 
+  const handleDeleteRole = async (roleIdToDelete: string) => {
+    if (availableRoles.length <= 1) {
+      alert('Cannot remove the only remaining Job Description role. At least one JD role must remain.');
+      return;
+    }
+
+    const targetRole = availableRoles.find((r) => r.id === roleIdToDelete);
+    const roleTitle = targetRole?.title || 'this Job Description';
+
+    if (
+      !window.confirm(
+        `Are you sure you want to remove the JD for "${roleTitle}"? This will delete the role specification and recalibrate rankings.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      storage.addDeletedRoleId(roleIdToDelete);
+
+      const remainingRoles = availableRoles.filter((r) => r.id !== roleIdToDelete);
+      setAvailableRoles(remainingRoles);
+
+      if (currentRoleId === roleIdToDelete && remainingRoles.length > 0) {
+        const nextRole = remainingRoles[0];
+        setCurrentRoleId(nextRole.id);
+        storage.setCurrentRoleId(nextRole.id);
+
+        const res = await api.selectRole(nextRole.id, nextRole);
+        const storedReqs = storage.getCalibratedRequirements(nextRole.id);
+        if (storedReqs && storedReqs.length > 0) {
+          setRequirements(storedReqs);
+        } else if (res.job) {
+          setRequirements(res.job.requirements || []);
+        }
+
+        let newCandidates: RankedCandidate[] = [];
+        const removedIds = storage.getRemovedCandidateIds();
+        if (res.ranked_candidates) {
+          newCandidates = res.ranked_candidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
+        } else {
+          const freshCandidates = await api.getCandidates();
+          newCandidates = freshCandidates.filter((c: RankedCandidate) => !removedIds.includes(c.id));
+        }
+        setCandidates(newCandidates);
+        storage.saveCachedCandidates(nextRole.id, newCandidates);
+      }
+
+      await api.deleteRole(roleIdToDelete).catch((err) => {
+        console.warn('Backend delete role notice:', err);
+      });
+    } catch (e) {
+      console.error('Failed to remove JD role:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleResetDemoData = async () => {
     if (
       window.confirm(
@@ -306,6 +378,7 @@ export function App() {
         onLogout={handleLogout}
         onOpenManualAddJD={handleOpenManualAddJD}
         onResetDemoData={handleResetDemoData}
+        onDeleteRole={handleDeleteRole}
       />
 
       {/* Main Container */}
@@ -320,6 +393,8 @@ export function App() {
             onOpenJDEditor={() => setIsJDEditorOpen(true)}
             onOpenUploadJD={() => handleOpenManualAddJD('upload')}
             currentRoleTitle={availableRoles.find((r) => r.id === currentRoleId)?.title || 'Senior Backend Engineer'}
+            currentRoleId={currentRoleId}
+            onDeleteRole={handleDeleteRole}
             onRemoveCandidate={handleRemoveCandidate}
           />
         )}
@@ -397,6 +472,7 @@ export function App() {
           currentRoleTitle={availableRoles.find((r) => r.id === currentRoleId)?.title || 'Senior Backend Engineer'}
           onClose={() => setIsJDEditorOpen(false)}
           onRequirementsUpdated={handleRequirementsUpdated}
+          onDeleteRole={handleDeleteRole}
         />
       )}
 
