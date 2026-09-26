@@ -4,7 +4,10 @@ import hashlib
 import os
 import json
 import tempfile
-from typing import List, Dict, Any, Optional
+import urllib.request
+import urllib.error
+import threading
+from typing import List, Dict, Any, Optional, Set
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Body
 from app.models.schemas import (
     JobCreate, JobUpdateRequirements, ScoringWeights, JobRequirement,
@@ -34,6 +37,7 @@ PROTECTED_PRESET_ROLES = {
 }
 
 STATE_FILE = os.path.join(tempfile.gettempdir(), "talentprism_shared_state.json")
+CLOUD_BIN_URL = "https://extendsclass.com/api/json-storage/bin/bdcdacc"
 
 # In-memory storage state (backed by seed data)
 current_job = dict(GLOBAL_JOB)
@@ -41,6 +45,7 @@ candidates_store: Dict[str, Dict[str, Any]] = {c["id"]: dict(c) for c in GLOBAL_
 current_weights = ScoringWeights()
 previous_ranks_cache: Dict[str, int] = {}
 registered_users: Dict[str, Dict[str, Any]] = {}
+deleted_candidate_ids: Set[str] = set()
 
 def normalize_requirement(req: Any) -> JobRequirement:
     """Safely converts a dict or model into a valid JobRequirement instance."""
@@ -102,9 +107,136 @@ def serialize_candidate(cand: Dict[str, Any]) -> Dict[str, Any]:
         c_copy["evidence_list"] = new_ev
     return c_copy
 
-def load_server_state():
+def load_cloud_state() -> bool:
+    """Fetch shared state from cloud bin across serverless containers and devices."""
+    global registered_users, deleted_candidate_ids, PRECONFIGURED_ROLES, candidates_store, current_job, current_weights
+    try:
+        req = urllib.request.Request(
+            CLOUD_BIN_URL,
+            headers={"User-Agent": "TalentPrism-Server/2.4"}
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            if resp.status == 200:
+                raw = resp.read().decode("utf-8")
+                if not raw.strip():
+                    return False
+                data = json.loads(raw)
+                
+                # 1. Registered users
+                cloud_users = data.get("registered_users", {})
+                if isinstance(cloud_users, dict):
+                    for u_key, u_val in cloud_users.items():
+                        if u_key and isinstance(u_val, dict):
+                            registered_users[str(u_key).lower()] = u_val
+                            if u_val.get("email"):
+                                registered_users[str(u_val["email"]).lower()] = u_val
+                            if u_val.get("name"):
+                                registered_users[str(u_val["name"]).lower()] = u_val
+
+                # 2. Deleted candidate IDs
+                cloud_deleted = data.get("deleted_candidate_ids", [])
+                if isinstance(cloud_deleted, list):
+                    for d_id in cloud_deleted:
+                        d_str = str(d_id)
+                        deleted_candidate_ids.add(d_str)
+                        candidates_store.pop(d_str, None)
+
+                # 3. Custom roles
+                cloud_roles = data.get("custom_roles", {})
+                if isinstance(cloud_roles, dict):
+                    for r_id, r in cloud_roles.items():
+                        if r_id and isinstance(r, dict) and r_id not in PROTECTED_PRESET_ROLES:
+                            r_copy = dict(r)
+                            r_copy["requirements"] = [normalize_requirement(x) for x in r_copy.get("requirements", [])]
+                            PRECONFIGURED_ROLES[r_id] = r_copy
+
+                # 4. Uploaded candidates
+                cloud_cands = data.get("uploaded_candidates", {})
+                if isinstance(cloud_cands, dict):
+                    for c_id, c in cloud_cands.items():
+                        if c_id and isinstance(c, dict) and str(c_id) not in deleted_candidate_ids:
+                            candidates_store[c_id] = c
+
+                # 5. Active role ID
+                cloud_active_id = data.get("active_role_id")
+                if cloud_active_id and cloud_active_id != "none" and cloud_active_id in PRECONFIGURED_ROLES:
+                    if current_job.get("id") in ("job_backend_core", ""):
+                        current_job = dict(PRECONFIGURED_ROLES[cloud_active_id])
+                        current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
+
+                return True
+    except Exception as e:
+        print(f"[load_cloud_state] Cloud fetch warning: {e}")
+    return False
+
+def save_cloud_state():
+    """Sync persistent state to cloud storage bin so all ephemeral lambdas and devices stay synchronized."""
+    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users, deleted_candidate_ids
+    try:
+        # 1. Fetch current cloud state first to merge and prevent overwriting concurrent updates
+        existing_cloud_users = {}
+        existing_cloud_deleted = []
+        existing_cloud_roles = {}
+        try:
+            req_get = urllib.request.Request(CLOUD_BIN_URL, headers={"User-Agent": "TalentPrism-Server/2.4"})
+            with urllib.request.urlopen(req_get, timeout=2.5) as get_resp:
+                if get_resp.status == 200:
+                    raw_get = get_resp.read().decode("utf-8")
+                    if raw_get.strip():
+                        cloud_data = json.loads(raw_get)
+                        existing_cloud_users = cloud_data.get("registered_users", {})
+                        existing_cloud_deleted = cloud_data.get("deleted_candidate_ids", [])
+                        existing_cloud_roles = cloud_data.get("custom_roles", {})
+        except Exception:
+            pass
+
+        # 2. Merge existing cloud users with local users
+        merged_users = dict(existing_cloud_users)
+        merged_users.update(registered_users)
+        registered_users.update(merged_users)
+
+        # 3. Merge deleted candidate IDs
+        for d in existing_cloud_deleted:
+            deleted_candidate_ids.add(str(d))
+
+        # 4. Merge custom roles
+        merged_roles = dict(existing_cloud_roles)
+        for r_id, r in PRECONFIGURED_ROLES.items():
+            if r_id not in PROTECTED_PRESET_ROLES:
+                merged_roles[r_id] = serialize_role(r)
+
+        uploaded_cands = {
+            c_id: serialize_candidate(c) for c_id, c in candidates_store.items()
+            if str(c_id).startswith("cand_upload_") and c_id not in deleted_candidate_ids
+        }
+        active_id = current_job.get("id", "job_backend_core")
+        
+        payload = {
+            "registered_users": merged_users,
+            "deleted_candidate_ids": list(deleted_candidate_ids),
+            "custom_roles": merged_roles,
+            "uploaded_candidates": uploaded_cands,
+            "active_role_id": active_id
+        }
+        body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+        req = urllib.request.Request(
+            CLOUD_BIN_URL,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "TalentPrism-Server/2.4"
+            },
+            method="PUT"
+        )
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            pass
+    except Exception as e:
+        print(f"[save_cloud_state] Cloud PUT warning: {e}")
+
+def load_server_state(check_cloud: bool = False):
     """Load persistent shared state across serverless lambda invocations and browsers."""
-    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users
+    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users, deleted_candidate_ids
+    loaded_local = False
     try:
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -130,26 +262,37 @@ def load_server_state():
             if isinstance(saved_users, dict):
                 for u_id, u in saved_users.items():
                     if u_id and isinstance(u, dict):
-                        registered_users[u_id] = u
+                        registered_users[str(u_id).lower()] = u
+                        if u.get("email"):
+                            registered_users[str(u["email"]).lower()] = u
+                        if u.get("name"):
+                            registered_users[str(u["name"]).lower()] = u
             elif isinstance(saved_users, list):
                 for u in saved_users:
                     if isinstance(u, dict):
                         key = u.get("email") or u.get("name")
                         if key:
-                            registered_users[key] = u
+                            registered_users[str(key).lower()] = u
                     
-            # 3. Uploaded candidates
+            # 3. Deleted candidate IDs
+            saved_deleted = data.get("deleted_candidate_ids", [])
+            if isinstance(saved_deleted, list):
+                for d_id in saved_deleted:
+                    deleted_candidate_ids.add(str(d_id))
+                    candidates_store.pop(str(d_id), None)
+
+            # 4. Uploaded candidates
             saved_cands = data.get("uploaded_candidates", {})
             if isinstance(saved_cands, dict):
                 for c_id, c in saved_cands.items():
-                    if c_id and isinstance(c, dict):
+                    if c_id and isinstance(c, dict) and str(c_id) not in deleted_candidate_ids:
                         candidates_store[c_id] = c
             elif isinstance(saved_cands, list):
                 for c in saved_cands:
-                    if isinstance(c, dict) and c.get("id"):
+                    if isinstance(c, dict) and c.get("id") and str(c["id"]) not in deleted_candidate_ids:
                         candidates_store[c["id"]] = c
                     
-            # 4. Active job role
+            # 5. Active job role
             active_id = data.get("active_role_id")
             if active_id == "none":
                 current_job = {
@@ -163,19 +306,28 @@ def load_server_state():
                 current_job = dict(PRECONFIGURED_ROLES[active_id])
                 current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
 
-            # 5. Scoring weights
+            # 6. Scoring weights
             saved_weights = data.get("scoring_weights")
             if saved_weights and isinstance(saved_weights, dict):
                 try:
                     current_weights = ScoringWeights(**saved_weights)
                 except Exception:
                     pass
+            loaded_local = True
     except Exception as e:
         print(f"[load_server_state] Warning: {e}")
 
-def save_server_state():
+    # Ensure any deleted candidates are removed from store
+    for d_id in deleted_candidate_ids:
+        candidates_store.pop(d_id, None)
+
+    # If local file is missing or registered_users is empty, or explicitly asked, hydrate from cloud
+    if check_cloud or not loaded_local or len(registered_users) == 0:
+        load_cloud_state()
+
+def save_server_state(sync_cloud: bool = True):
     """Persist shared state to file so other invocations and browsers get synced state."""
-    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users
+    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users, deleted_candidate_ids
     try:
         custom_roles = {
             r_id: serialize_role(r) for r_id, r in PRECONFIGURED_ROLES.items()
@@ -183,7 +335,7 @@ def save_server_state():
         }
         uploaded_cands = {
             c_id: serialize_candidate(c) for c_id, c in candidates_store.items()
-            if str(c_id).startswith("cand_upload_")
+            if str(c_id).startswith("cand_upload_") and c_id not in deleted_candidate_ids
         }
         active_id = current_job.get("id", "job_backend_core")
         weights_dict = current_weights.model_dump() if hasattr(current_weights, "model_dump") else current_weights.dict()
@@ -192,6 +344,7 @@ def save_server_state():
             "active_role_id": active_id,
             "custom_roles": custom_roles,
             "registered_users": registered_users,
+            "deleted_candidate_ids": list(deleted_candidate_ids),
             "uploaded_candidates": uploaded_cands,
             "scoring_weights": weights_dict,
         }
@@ -199,6 +352,13 @@ def save_server_state():
             json.dump(state_data, f, ensure_ascii=False, indent=2, default=str)
     except Exception as e:
         print(f"[save_server_state] Warning: {e}")
+
+    if sync_cloud:
+        try:
+            t = threading.Thread(target=save_cloud_state, daemon=True)
+            t.start()
+        except Exception:
+            save_cloud_state()
 
 def get_current_job_requirements() -> List[JobRequirement]:
     """Retrieves and normalizes current_job requirements."""
@@ -342,33 +502,69 @@ def get_admin_key_info():
 def find_user_record(identifier: str, client_backup: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Finds a registered or authorized user by email, name, or User ID.
-    If not found in server memory but client provides valid backup from registration, restores it.
+    If not found in local memory, hydrates immediately from the cloud storage bin.
     """
     clean_id = identifier.strip().lower()
+    clean_no_spaces = clean_id.replace(" ", "")
 
-    # 1. Direct match in registered_users (by email or registered name)
-    if clean_id in registered_users:
-        return registered_users[clean_id]
+    def match_in_dict(source_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not source_dict:
+            return None
+        # Direct key match
+        if clean_id in source_dict and isinstance(source_dict[clean_id], dict):
+            return source_dict[clean_id]
+        if clean_no_spaces in source_dict and isinstance(source_dict[clean_no_spaces], dict):
+            return source_dict[clean_no_spaces]
 
-    # 2. Loop across registered_users values
-    for rec in registered_users.values():
-        if rec.get("email", "").lower() == clean_id or rec.get("name", "").lower() == clean_id:
-            return rec
+        # Iterate records
+        for key, rec in source_dict.items():
+            if not isinstance(rec, dict):
+                continue
+            rec_email = str(rec.get("email", "")).strip().lower()
+            rec_name = str(rec.get("name", "")).strip().lower()
+            rec_user = rec_email.split("@")[0] if "@" in rec_email else rec_email
+            rec_name_no_spaces = rec_name.replace(" ", "")
 
-    # 3. Direct or name match in pre-seeded AUTHORIZED_USERS
-    if clean_id in AUTHORIZED_USERS:
-        return AUTHORIZED_USERS[clean_id]
-    for rec in AUTHORIZED_USERS.values():
-        if rec.get("email", "").lower() == clean_id or rec.get("name", "").lower() == clean_id:
-            return rec
+            if clean_id in (rec_email, rec_name, rec_user):
+                return rec
+            if clean_no_spaces == rec_name_no_spaces:
+                return rec
+            # First name match for convenience if at least 3 letters
+            if len(clean_id) >= 3 and rec_name and clean_id == rec_name.split()[0]:
+                return rec
+        return None
 
-    # 4. Check client backup (restores newly registered users across serverless cold starts)
+    # 1. Direct match in local registered_users
+    found = match_in_dict(registered_users)
+    if found:
+        return found
+
+    # 2. Match in pre-seeded AUTHORIZED_USERS
+    found = match_in_dict(AUTHORIZED_USERS)
+    if found:
+        return found
+
+    # 3. Not in memory -> Hydrate from cloud storage bin (handles cross-browser / multi-device login)
+    try:
+        if load_cloud_state():
+            found = match_in_dict(registered_users)
+            if found:
+                return found
+    except Exception as e:
+        print(f"[find_user_record] Cloud hydration warning: {e}")
+
+    # 4. Check client backup (from browser localStorage)
     if client_backup and isinstance(client_backup, dict):
         b_email = str(client_backup.get("email", "")).strip().lower()
         b_name = str(client_backup.get("name", "")).strip().lower()
-        if (b_email == clean_id or b_name == clean_id) and client_backup.get("password"):
+        b_user = b_email.split("@")[0] if "@" in b_email else b_email
+        b_no_spaces = b_name.replace(" ", "")
+
+        if (clean_id in (b_email, b_name, b_user) or clean_no_spaces == b_no_spaces) and client_backup.get("password"):
             registered_users[b_email] = client_backup
             registered_users[b_name] = client_backup
+            registered_users[b_user] = client_backup
+            save_server_state(sync_cloud=True)
             return client_backup
 
     return None
@@ -465,9 +661,14 @@ def register_user(payload: Dict[str, Any] = Body(...)):
         "department": "Talent Intelligence & Acquisition",
         "is_admin": True
     }
+    user_part = email.split("@")[0] if "@" in email else email
     registered_users[email] = user_record
     registered_users[name.lower()] = user_record
-    save_server_state()
+    registered_users[name.lower().replace(" ", "")] = user_record
+    registered_users[user_part] = user_record
+
+    save_server_state(sync_cloud=False)
+    save_cloud_state()
 
     session_token = f"prism_token_{hashlib.sha256(f'{email}:{password}:talentprism_salt'.encode()).hexdigest()[:24]}"
     return {
@@ -701,8 +902,8 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
     # 5. Apply removed candidate IDs
     removed_ids = payload.get("removed_candidate_ids", [])
     for rid in removed_ids:
-        if rid in candidates_store:
-            candidates_store.pop(rid, None)
+        deleted_candidate_ids.add(str(rid))
+        candidates_store.pop(str(rid), None)
 
     # 6. Sync any uploaded candidates from client localStorage
     uploaded_cands = payload.get("uploaded_candidates", [])
@@ -1363,8 +1564,12 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
 @router.get("/candidates")
 def get_candidates():
     load_server_state()
+    active_candidates = [
+        c for c in candidates_store.values()
+        if str(c.get("id", "")) not in deleted_candidate_ids
+    ]
     ranked, _ = scoring_engine.rank_candidates(
-        list(candidates_store.values()),
+        active_candidates,
         current_job["requirements"],
         current_weights,
         previous_ranks=previous_ranks_cache
@@ -1374,20 +1579,22 @@ def get_candidates():
 def get_candidate_safe(candidate_id: str) -> Dict[str, Any]:
     """
     Safely retrieves a candidate from candidates_store.
-    If missing (e.g. cold start on Vercel or uploaded candidate from client),
-    synthesizes a fully valid candidate profile to guarantee no 404 crashes.
+    If the candidate was deleted by the recruiter, returns 404 (does NOT resurrect).
+    If an un-deleted candidate is missing, synthesizes a valid profile.
     """
-    global candidates_store
+    global candidates_store, deleted_candidate_ids
     load_server_state()
+
+    # Explicitly deleted candidates MUST NEVER be resurrected
+    if candidate_id in deleted_candidate_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Candidate {candidate_id} has been removed from the talent pool."
+        )
+
     cand = candidates_store.get(candidate_id)
     if cand:
         return cand
-
-    # Match Elena if requested
-    if "elena" in candidate_id.lower():
-        for c in candidates_store.values():
-            if "elena" in c.get("id", "").lower() or "elena" in c.get("name", "").lower():
-                return c
 
     # Clean name from ID
     clean_name = re.sub(r"cand_(upload_)?", "", candidate_id)
@@ -1470,7 +1677,8 @@ def get_candidate_safe(candidate_id: str) -> Dict[str, Any]:
         "certifications": [],
         "notes": []
     }
-    candidates_store[candidate_id] = synth_cand
+    if candidate_id.startswith("cand_upload_"):
+        candidates_store[candidate_id] = synth_cand
     return synth_cand
 
 @router.get("/candidates/{candidate_id}")
@@ -1480,23 +1688,25 @@ def get_candidate(candidate_id: str):
 @router.delete("/candidates/{candidate_id}")
 def delete_candidate(candidate_id: str):
     """Remove / dismiss candidate from active applicant pool."""
-    if candidate_id in candidates_store:
-        deleted = candidates_store.pop(candidate_id)
-        refresh_baseline_ranking()
-        ranked, _ = scoring_engine.rank_candidates(
-            list(candidates_store.values()),
-            current_job["requirements"],
-            current_weights,
-            previous_ranks=previous_ranks_cache,
-            reason=f"Recruiter removed candidate {deleted['name']} from active talent pool"
-        )
-        for r in ranked:
-            if r.id in candidates_store:
-                candidates_store[r.id]["rank"] = r.rank
-                candidates_store[r.id]["overall_match"] = r.overall_match
-        save_server_state()
-        return {"success": True, "deleted_id": candidate_id, "remaining_candidates": ranked}
-    return {"success": True, "deleted_id": candidate_id, "remaining_candidates": []}
+    global deleted_candidate_ids, candidates_store
+    deleted_candidate_ids.add(str(candidate_id))
+    deleted = candidates_store.pop(candidate_id, None)
+
+    refresh_baseline_ranking()
+    active_candidates = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
+    ranked, _ = scoring_engine.rank_candidates(
+        active_candidates,
+        current_job["requirements"],
+        current_weights,
+        previous_ranks=previous_ranks_cache,
+        reason=f"Recruiter removed candidate {deleted['name'] if deleted else candidate_id} from active talent pool"
+    )
+    for r in ranked:
+        if r.id in candidates_store:
+            candidates_store[r.id]["rank"] = r.rank
+            candidates_store[r.id]["overall_match"] = r.overall_match
+    save_server_state(sync_cloud=True)
+    return {"success": True, "deleted_id": candidate_id, "remaining_candidates": ranked}
 
 @router.get("/candidates/{candidate_id}/skills")
 def get_candidate_skills(candidate_id: str):
@@ -1717,7 +1927,8 @@ def get_talent_rescue(job_id: str):
     within_role_candidates = []
     cross_role_candidates = []
 
-    for cand_id, cand in candidates_store.items():
+    active_cands = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
+    for cand in active_cands:
         lens = talent_lens.analyze_candidate(
             candidate_id=cand["id"],
             candidate_name=cand["name"],
@@ -1756,8 +1967,9 @@ def simulate_priority_ranking(job_id: str, payload: PrioritySimulationRequest):
     Recruiter Priority Simulator:
     Recruiter changes weight sliders -> generates a temporary scenario ranking without overwriting production ranking!
     """
+    active_cands = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
     scenario_ranked, _ = scoring_engine.rank_candidates(
-        list(candidates_store.values()),
+        active_cands,
         current_job["requirements"],
         payload.weights,
         previous_ranks=previous_ranks_cache
@@ -1772,17 +1984,21 @@ def simulate_priority_ranking(job_id: str, payload: PrioritySimulationRequest):
 def simulate_candidate_skill(candidate_id: str, payload: SkillScenarioRequest):
     """
     Skill Scenario Simulator:
-    Recruiter selects candidate (e.g. Elena) and increases skill strength (e.g. Docker 31% -> 75%).
-    Shows simulated rank jump (e.g. #12 -> #5) with prominent disclaimer:
+    Recruiter selects candidate and increases skill strength (e.g. Docker 31% -> 75%).
+    Shows simulated rank jump with prominent disclaimer:
     'Scenario only. No additional candidate evidence has been established.'
     """
+    if candidate_id in deleted_candidate_ids:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
     cand = candidates_store.get(candidate_id)
     if not cand:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
     # Create temporary candidate copy
     import copy
-    temp_candidates = copy.deepcopy(list(candidates_store.values()))
+    active_cands = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
+    temp_candidates = copy.deepcopy(active_cands)
 
     # Find candidate and modify the selected skill
     actual_rank = cand.get("rank", 1)
@@ -1853,11 +2069,12 @@ def pool_candidates_by_skills(job_id: str, payload: Dict[str, Any] = Body(...)):
     matching those skills with their real evidence scores.
     """
     selected_skills = payload.get("skills", [])
+    active_cands = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
     if not selected_skills:
         return {
-            "total_applicants": len(candidates_store),
-            "matching_count": len(candidates_store),
-            "full_match_count": len(candidates_store),
+            "total_applicants": len(active_cands),
+            "matching_count": len(active_cands),
+            "full_match_count": len(active_cands),
             "percentage": 100.0,
             "candidates": [
                 {
@@ -1870,12 +2087,12 @@ def pool_candidates_by_skills(job_id: str, payload: Dict[str, Any] = Body(...)):
                     "is_full_match": True,
                     "skill_scores": {}
                 }
-                for c in candidates_store.values()
+                for c in active_cands
             ]
         }
 
     matching = []
-    for cand in candidates_store.values():
+    for cand in active_cands:
         portfolio = cand.get("all_skills_portfolio", {})
         skill_scores = {}
         matched_all = True
@@ -1909,10 +2126,10 @@ def pool_candidates_by_skills(job_id: str, payload: Dict[str, Any] = Body(...)):
     full_count = sum(1 for m in matching if m["is_full_match"])
 
     return {
-        "total_applicants": len(candidates_store),
+        "total_applicants": len(active_cands),
         "matching_count": len(matching),
         "full_match_count": full_count,
-        "percentage": round((len(matching) / len(candidates_store)) * 100.0, 1),
+        "percentage": round((len(matching) / max(1, len(active_cands))) * 100.0, 1),
         "candidates": matching
     }
 
@@ -1954,15 +2171,17 @@ def create_interview_plan(candidate_id: str):
 # --- POOL INTELLIGENCE, EVIDENCE MATRIX & AUDIT TRAIL ---
 @router.get("/jobs/{job_id}/pool-intelligence")
 def get_pool_intelligence(job_id: str):
+    active_cands = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
     return pool_intelligence.compute_pool_analytics(
-        list(candidates_store.values()),
+        active_cands,
         current_job["requirements"]
     )
 
 @router.get("/jobs/{job_id}/evidence-matrix")
 def get_evidence_matrix(job_id: str):
+    active_cands = [c for c in candidates_store.values() if str(c.get("id", "")) not in deleted_candidate_ids]
     return pool_intelligence.build_evidence_matrix(
-        list(candidates_store.values()),
+        active_cands,
         current_job["requirements"]
     )
 

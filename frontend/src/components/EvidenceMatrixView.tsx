@@ -136,7 +136,9 @@ export const EvidenceMatrixView: React.FC<EvidenceMatrixProps> = ({ onSelectCand
               <Sparkles className="w-4 h-4 text-purple-400" />
               <div>
                 <span className="text-[10px] uppercase font-bold text-purple-300 block">Concentrated Gap Flag</span>
-                <span className="text-xs font-bold text-white">{suppressedProfiles.length} Profiles Suppressed (e.g. Elena #14)</span>
+                <span className="text-xs font-bold text-white">
+                  {suppressedProfiles.length} Profiles Suppressed {suppressedProfiles.length > 0 ? `(e.g. ${suppressedProfiles[0].candidate_name || suppressedProfiles[0].name})` : ''}
+                </span>
               </div>
             </div>
           </div>
@@ -258,13 +260,15 @@ export const EvidenceMatrixView: React.FC<EvidenceMatrixProps> = ({ onSelectCand
             </thead>
             <tbody className="divide-y divide-white/5 font-mono">
               {filteredRows.map((row: any) => {
-                const isElena = row.candidate_id === 'cand_elena';
+                const isSuppressed = suppressedProfiles.some(
+                  (p: any) => (p.candidate_id || p.id) === row.candidate_id
+                );
 
                 return (
                   <tr
                     key={row.candidate_id}
                     className={`hover:bg-slate-800/60 transition-colors ${
-                      isElena ? 'bg-purple-950/25 border-l-4 border-l-purple-500' : ''
+                      isSuppressed ? 'bg-purple-950/25 border-l-4 border-l-purple-500' : ''
                     }`}
                   >
                     {/* Candidate Name & Title */}
@@ -275,7 +279,7 @@ export const EvidenceMatrixView: React.FC<EvidenceMatrixProps> = ({ onSelectCand
                       >
                         <div className="flex items-center space-x-1.5">
                           <span className="font-bold text-white text-xs">{row.candidate_name}</span>
-                          {isElena && (
+                          {isSuppressed && (
                             <span className="px-1.5 py-0.2 rounded bg-purple-500/30 text-purple-200 text-[9px] font-bold">
                               Talent Lens
                             </span>

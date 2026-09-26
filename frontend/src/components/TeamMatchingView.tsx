@@ -21,18 +21,31 @@ export const TeamMatchingView: React.FC<TeamMatchingViewProps> = ({
   candidates,
   onSelectCandidate,
 }) => {
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string>('cand_elena');
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>(() => candidates[0]?.id || '');
   const [teamProfile, setTeamProfile] = useState<any>(null);
   const [teamMatch, setTeamMatch] = useState<TeamMatchAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Automatically ensure a valid candidate is selected when pool updates or candidate deleted
+  useEffect(() => {
+    if (candidates.length > 0 && (!selectedCandidateId || !candidates.some((c) => c.id === selectedCandidateId))) {
+      setSelectedCandidateId(candidates[0].id);
+    }
+  }, [candidates, selectedCandidateId]);
+
   const currentCandidate = candidates.find((c) => c.id === selectedCandidateId) || candidates[0];
 
   useEffect(() => {
-    loadTeamData();
+    if (selectedCandidateId) {
+      loadTeamData();
+    }
   }, [selectedCandidateId]);
 
   const loadTeamData = async () => {
+    if (!selectedCandidateId) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const [profile, match] = await Promise.all([
@@ -47,6 +60,18 @@ export const TeamMatchingView: React.FC<TeamMatchingViewProps> = ({
       setLoading(false);
     }
   };
+
+  if (candidates.length === 0) {
+    return (
+      <div className="glass-panel p-12 text-center rounded-2xl border border-white/10 space-y-3">
+        <Users className="w-10 h-10 text-cyan-400 mx-auto opacity-60" />
+        <h3 className="text-base font-bold text-white">No Applicants in Active Pool</h3>
+        <p className="text-xs text-slate-400 max-w-md mx-auto">
+          There are currently no active candidates. Upload candidate CVs or select an active Job Description role to evaluate team matching.
+        </p>
+      </div>
+    );
+  }
 
   if (loading || !teamProfile || !teamMatch) {
     return (
@@ -84,7 +109,7 @@ export const TeamMatchingView: React.FC<TeamMatchingViewProps> = ({
         <div className="flex items-center space-x-2">
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Evaluate Candidate:</span>
           <div className="flex flex-wrap items-center gap-2">
-            {candidates.slice(0, 5).map((c) => (
+            {candidates.slice(0, 6).map((c) => (
               <button
                 key={c.id}
                 onClick={() => setSelectedCandidateId(c.id)}
@@ -98,15 +123,18 @@ export const TeamMatchingView: React.FC<TeamMatchingViewProps> = ({
                 <span className="font-mono text-[10px] opacity-75">#{c.rank}</span>
               </button>
             ))}
-            {/* Elena if not in top 5 */}
-            {selectedCandidateId === 'cand_elena' && !candidates.slice(0, 5).some((c) => c.id === 'cand_elena') && (
-              <button
-                onClick={() => setSelectedCandidateId('cand_elena')}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 text-white shadow-lg shadow-purple-600/30 flex items-center space-x-2"
+            {candidates.length > 6 && (
+              <select
+                value={selectedCandidateId}
+                onChange={(e) => setSelectedCandidateId(e.target.value)}
+                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
               >
-                <span>Elena Rostova</span>
-                <span className="font-mono text-[10px] opacity-75">#14</span>
-              </button>
+                {candidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} (#{c.rank})
+                  </option>
+                ))}
+              </select>
             )}
           </div>
         </div>

@@ -87,7 +87,14 @@ export function App() {
   const [isManualAddJDOpen, setIsManualAddJDOpen] = useState<boolean>(false);
   const [manualAddJDMode, setManualAddJDMode] = useState<'upload' | 'manual'>('upload');
   const [isDemoTourOpen, setIsDemoTourOpen] = useState<boolean>(false);
-  const [simulatorCandidateId, setSimulatorCandidateId] = useState<string>('cand_elena');
+  const [simulatorCandidateId, setSimulatorCandidateId] = useState<string>(() => candidates[0]?.id || '');
+
+  // Keep simulatorCandidateId aligned with active candidates
+  useEffect(() => {
+    if (candidates.length > 0 && (!simulatorCandidateId || !candidates.some((c) => c.id === simulatorCandidateId))) {
+      setSimulatorCandidateId(candidates[0].id);
+    }
+  }, [candidates, simulatorCandidateId]);
 
   const handleOpenManualAddJD = (mode: 'upload' | 'manual' = 'upload') => {
     setManualAddJDMode(mode);
@@ -369,7 +376,11 @@ export function App() {
   };
 
   const handleOpenSimulator = (candidateId?: string) => {
-    if (candidateId) setSimulatorCandidateId(candidateId);
+    if (candidateId && candidates.some((c) => c.id === candidateId)) {
+      setSimulatorCandidateId(candidateId);
+    } else if (candidates.length > 0) {
+      setSimulatorCandidateId(candidates[0].id);
+    }
     setActiveTab('what_if');
   };
 
@@ -443,6 +454,9 @@ export function App() {
       setCandidates((prev) => {
         const updated = prev.filter((c) => c.id !== candidateId);
         storage.saveCachedCandidates(currentRoleId, updated);
+        if (simulatorCandidateId === candidateId) {
+          setSimulatorCandidateId(updated[0]?.id || '');
+        }
         return updated;
       });
       broadcastTabSync({

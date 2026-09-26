@@ -24,12 +24,21 @@ export const TalentLensView: React.FC<TalentLensViewProps> = ({
   onSelectCandidate,
   onOpenSimulator,
 }) => {
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string>('cand_elena');
+  // Candidates with Talent Lens alerts (fallback to first candidates if none flagged)
+  const alertCandidates = candidates.filter((c) => c.has_talent_lens_alert);
+  const displayPool = alertCandidates.length > 0 ? alertCandidates : candidates.slice(0, 6);
+
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>(() => displayPool[0]?.id || '');
   const [lensData, setLensData] = useState<TalentLensInsight | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Candidates with Talent Lens alerts
-  const alertCandidates = candidates.filter((c) => c.has_talent_lens_alert || c.id === 'cand_elena');
+  // Automatically ensure a valid candidate is selected when pool changes or candidate deleted
+  useEffect(() => {
+    if (displayPool.length > 0 && (!selectedCandidateId || !candidates.some((c) => c.id === selectedCandidateId))) {
+      setSelectedCandidateId(displayPool[0].id);
+    }
+  }, [displayPool, candidates, selectedCandidateId]);
+
   const currentCandidate = candidates.find((c) => c.id === selectedCandidateId) || candidates[0];
 
   useEffect(() => {
@@ -39,6 +48,7 @@ export const TalentLensView: React.FC<TalentLensViewProps> = ({
   }, [selectedCandidateId]);
 
   const loadLensData = async (cid: string) => {
+    if (!cid) return;
     try {
       setLoading(true);
       const data = await api.getTalentLens(cid);
@@ -242,9 +252,9 @@ export const TalentLensView: React.FC<TalentLensViewProps> = ({
                 ))}
 
                 <p className="text-slate-400 text-[11px] leading-relaxed">
-                  Recruiter Strategy: Do not reject this candidate. Elena has superior backend fundamentals. Instead,
+                  Recruiter Strategy: Do not reject this candidate. {currentCandidate?.name || 'This applicant'} demonstrates superior core fundamentals. Instead,
                   use the <span className="text-white font-semibold">AI Interview Intelligence</span> module to test
-                  Docker containerization skills directly.
+                  unverified secondary requirements directly.
                 </p>
               </div>
 

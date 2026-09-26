@@ -66,9 +66,12 @@ export const WhatIfSimulatorView: React.FC<WhatIfSimulatorViewProps> = ({
   const [loadingPool, setLoadingPool] = useState(false);
 
   // --- MODE 2: CANDIDATE SKILL SCENARIO STATE ---
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string>(
-    initialCandidateId || 'cand_elena'
-  );
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>(() => {
+    if (initialCandidateId && candidates.some((c) => c.id === initialCandidateId)) {
+      return initialCandidateId;
+    }
+    return candidates[0]?.id || '';
+  });
   const [selectedCandidateSkills, setSelectedCandidateSkills] = useState<Record<string, number>>({});
   const [selectedSkill, setSelectedSkill] = useState<string>('Docker');
   const [simulatedStrength, setSimulatedStrength] = useState<number>(75);
@@ -91,16 +94,25 @@ export const WhatIfSimulatorView: React.FC<WhatIfSimulatorViewProps> = ({
   const [simulatingWeights, setSimulatingWeights] = useState(false);
   const [appliedNotice, setAppliedNotice] = useState(false);
 
+  // Automatically ensure a valid candidate is selected when pool updates or candidate is deleted
+  useEffect(() => {
+    if (candidates.length > 0 && (!selectedCandidateId || !candidates.some((c) => c.id === selectedCandidateId))) {
+      setSelectedCandidateId(candidates[0].id);
+    }
+  }, [candidates, selectedCandidateId]);
+
   // Update selected candidate if initialCandidateId changes
   useEffect(() => {
-    if (initialCandidateId) {
+    if (initialCandidateId && candidates.some((c) => c.id === initialCandidateId)) {
       setSelectedCandidateId(initialCandidateId);
     }
-  }, [initialCandidateId]);
+  }, [initialCandidateId, candidates]);
 
   // Load real skills for selected candidate
   useEffect(() => {
-    loadCandidateRealSkills(selectedCandidateId);
+    if (selectedCandidateId) {
+      loadCandidateRealSkills(selectedCandidateId);
+    }
   }, [selectedCandidateId]);
 
   // Trigger skill scenario simulation when candidate, skill, or strength changes
@@ -596,14 +608,11 @@ export const WhatIfSimulatorView: React.FC<WhatIfSimulatorViewProps> = ({
                   onChange={(e) => setSelectedCandidateId(e.target.value)}
                   className="w-full p-2.5 bg-slate-900 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500"
                 >
-                  <option value="cand_elena">Elena Rostova (Signature Demo Candidate)</option>
-                  {candidates
-                    .filter((c) => c.id !== 'cand_elena')
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} (Current: #{c.rank})
-                      </option>
-                    ))}
+                  {candidates.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} (#{c.rank} • {c.current_title})
+                    </option>
+                  ))}
                 </select>
               </div>
 
