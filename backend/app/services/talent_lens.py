@@ -92,17 +92,17 @@ class TalentLensEngine:
                 "candidate_score": score,
                 "pool_average": pool_avg,
                 "difference": round(diff, 1),
-                "is_outperforming": diff > 10.0,
-                "is_underperforming": diff < -15.0
+                "is_outperforming": diff >= 8.0,
+                "is_underperforming": diff <= -12.0
             }
             pool_comparison.append(comp_entry)
 
-            if score >= 88.0 and diff > 15.0:
+            if score >= 78.0 or diff >= 10.0:
                 strengths.append(comp_entry)
-            elif score <= 45.0 and diff < -20.0 and eval_item.category in ("REQUIRED", "PREFERRED"):
+            elif score <= 55.0 or diff <= -12.0 or eval_item.evidence_gap >= 45.0:
                 suppressors.append(comp_entry)
 
-        # Suppression condition: Top-tier core skills (Python, FastAPI, SQL >= 90), but pulled down by 1-2 lower scores
+        # Suppression condition: High performance in core skills (>= 78%), but rank suppressed by 1 or more gaps
         is_suppressed = len(strengths) >= 2 and len(suppressors) >= 1
         archetype = "SPECIALIST-LIKE EVIDENCE PROFILE" if is_suppressed or len(strengths) >= 3 else "BALANCED EVIDENCE PROFILE"
 
@@ -222,12 +222,14 @@ class TalentLensEngine:
         self,
         candidate_id: str,
         candidate_name: str,
-        skill_evals: Dict[str, Any]
+        skill_evals: Dict[str, Any],
+        candidate: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Evaluate candidate against other currently open company roles.
+        Evaluate candidate against other currently open company roles using their complete skills portfolio.
         """
         skill_evals = {k: _normalize_eval(v) for k, v in (skill_evals or {}).items()}
+        portfolio = dict(candidate.get("all_skills_portfolio", {})) if candidate else {}
         cross_role_matches = []
         for role in OTHER_OPEN_ROLES:
             role_skills = role["skills"]
@@ -235,13 +237,20 @@ class TalentLensEngine:
             matching_skills = []
             
             for s in role_skills:
-                if s in skill_evals:
+                score = portfolio.get(s)
+                if score is None and s in skill_evals:
                     score = skill_evals[s].evidence_strength
-                    scores.append(score)
-                    if score >= 60.0:
-                        matching_skills.append(s)
-                else:
-                    scores.append(40.0) # Baseline assumption for un-evaluated
+                if score is None:
+                    for pk, pv in portfolio.items():
+                        if pk.lower() == s.lower():
+                            score = float(pv)
+                            break
+                if score is None:
+                    score = 45.0
+                
+                scores.append(score)
+                if score >= 60.0:
+                    matching_skills.append(s)
 
             avg_score = sum(scores) / len(scores) if scores else 50.0
 
@@ -251,8 +260,8 @@ class TalentLensEngine:
                 "department": role["department"],
                 "fit_percentage": round(avg_score, 1),
                 "matched_skills": matching_skills,
-                "key_advantage": f"Strong alignment in {', '.join(matching_skills[:3])}",
-                "status": "Recommended for Cross-Role Review" if avg_score >= 75.0 else "Viable Alternative"
+                "key_advantage": f"Strong alignment in {', '.join(matching_skills[:3])}" if matching_skills else f"Foundational {role['department']} background",
+                "status": "Recommended for Cross-Role Review" if avg_score >= 72.0 else "Viable Alternative"
             })
 
         cross_role_matches.sort(key=lambda x: x["fit_percentage"], reverse=True)

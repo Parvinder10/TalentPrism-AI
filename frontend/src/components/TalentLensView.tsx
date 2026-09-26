@@ -83,9 +83,11 @@ export const TalentLensView: React.FC<TalentLensViewProps> = ({
       {/* Candidate Selector Bar */}
       <div className="glass-panel p-4 rounded-xl border border-white/10 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center space-x-2">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Suppressed Talent Pool:</span>
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            {alertCandidates.length > 0 ? 'Suppressed Talent Pool:' : 'Evaluate Candidate:'}
+          </span>
           <div className="flex flex-wrap items-center gap-2">
-            {alertCandidates.map((c) => (
+            {displayPool.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setSelectedCandidateId(c.id)}
@@ -97,9 +99,22 @@ export const TalentLensView: React.FC<TalentLensViewProps> = ({
               >
                 <span>{c.name}</span>
                 <span className="font-mono text-[10px] opacity-75">#{c.rank}</span>
-                <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                {c.has_talent_lens_alert && <span className="w-2 h-2 rounded-full bg-purple-400"></span>}
               </button>
             ))}
+            {candidates.length > displayPool.length && (
+              <select
+                value={selectedCandidateId}
+                onChange={(e) => setSelectedCandidateId(e.target.value)}
+                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+              >
+                {candidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} (#{c.rank}) {c.has_talent_lens_alert ? '★ Alert' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 

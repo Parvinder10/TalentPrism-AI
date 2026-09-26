@@ -55,12 +55,14 @@ export const TalentRescueView: React.FC<TalentRescueViewProps> = ({ onSelectCand
   }
 
   const removedIds = storage.getRemovedCandidateIds();
-  const within_role_rescue = (rescueData.within_role_rescue || []).filter(
-    (c: any) => !removedIds.includes(c.candidate_id)
-  );
-  const cross_role_rescue = (rescueData.cross_role_rescue || []).filter(
-    (c: any) => !removedIds.includes(c.candidate_id)
-  );
+  const within_role_rescue = (rescueData.within_role_rescue || []).filter((item: any) => {
+    const cid = item.candidate?.id || item.candidate_id || item.id;
+    return cid && !removedIds.includes(cid);
+  });
+  const cross_role_rescue = (rescueData.cross_role_rescue || []).filter((item: any) => {
+    const cid = item.candidate?.id || item.candidate_id || item.id;
+    return cid && !removedIds.includes(cid);
+  });
 
   return (
     <div className="space-y-6">
@@ -117,7 +119,16 @@ export const TalentRescueView: React.FC<TalentRescueViewProps> = ({ onSelectCand
             <span className="text-cyan-400 font-semibold">{within_role_rescue.length} candidates need human review</span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {within_role_rescue.length === 0 ? (
+            <div className="glass-panel p-8 text-center rounded-xl border border-white/10 space-y-2">
+              <ShieldCheck className="w-8 h-8 text-cyan-400 mx-auto opacity-50" />
+              <p className="text-sm font-semibold text-white">No Suppressed Profiles Requiring Within-Role Rescue</p>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                All candidates in the active pool demonstrate consistent capability across role requirements. Check Mode B for cross-role opportunities.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {within_role_rescue.map((item: any) => {
               const c = item.candidate;
               const lens = item.lens;
@@ -174,6 +185,7 @@ export const TalentRescueView: React.FC<TalentRescueViewProps> = ({ onSelectCand
               );
             })}
           </div>
+          )}
         </div>
       )}
 

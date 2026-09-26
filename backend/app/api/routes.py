@@ -1942,18 +1942,40 @@ def get_talent_rescue(job_id: str):
                 "rescue_note": "Strong core evidence with concentrated uncertainty — review before rejecting."
             })
 
-        # Cross-role check
+        # Cross-role check using complete portfolio
         cross_matches = talent_lens.evaluate_cross_role_rescue(
             candidate_id=cand["id"],
             candidate_name=cand["name"],
-            skill_evals=cand.get("skill_evals", {})
+            skill_evals=cand.get("skill_evals", {}),
+            candidate=cand
         )
-        if cross_matches and cross_matches[0]["fit_percentage"] >= 80.0:
+        if cross_matches and cross_matches[0]["fit_percentage"] >= 72.0:
             cross_role_candidates.append({
                 "candidate": cand,
                 "best_alternative_role": cross_matches[0],
                 "all_alternatives": cross_matches
             })
+
+    # If within_role_candidates is empty, identify candidates with highest core capability and a gap
+    if not within_role_candidates and len(active_cands) >= 3:
+        for cand in active_cands:
+            evals = cand.get("skill_evals", {})
+            gaps = [k for k, v in evals.items() if getattr(v, "evidence_strength", 50.0) <= 55.0]
+            highs = [k for k, v in evals.items() if getattr(v, "evidence_strength", 50.0) >= 75.0]
+            if gaps and highs:
+                lens = talent_lens.analyze_candidate(
+                    candidate_id=cand["id"],
+                    candidate_name=cand["name"],
+                    skill_evals=evals,
+                    current_rank=cand.get("rank", 5)
+                )
+                within_role_candidates.append({
+                    "candidate": cand,
+                    "lens": lens,
+                    "rescue_note": f"Strong core capabilities ({', '.join(highs[:2])}) with unverified {gaps[0]} — review before rejecting."
+                })
+                if len(within_role_candidates) >= 6:
+                    break
 
     return {
         "within_role_rescue": within_role_candidates,

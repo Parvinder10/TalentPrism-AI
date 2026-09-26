@@ -173,8 +173,17 @@ class ScoringEngine:
                             major_gap = r.name
                             break
 
-            # Talent Lens Badge
+            # Talent Lens Badge - dynamically evaluated for high-potential suppressed profiles
             has_talent_lens = cand.get("is_suppressed", False)
+            if not has_talent_lens and skill_evals:
+                scores = [
+                    getattr(v, "evidence_strength", v) if not isinstance(v, dict) else v.get("evidence_strength", 50.0)
+                    for v in skill_evals.values()
+                ]
+                high_count = sum(1 for s in scores if s >= 78.0)
+                low_count = sum(1 for s in scores if s <= 55.0)
+                if high_count >= 2 and low_count >= 1 and current_rank >= 3:
+                    has_talent_lens = True
             tl_badge = "Hidden Core Strength" if has_talent_lens else None
 
             ranked_item = RankedCandidate(
