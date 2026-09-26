@@ -38,8 +38,24 @@ export const api = {
     return handleResponse(res);
   },
 
-  getAuthorizedAccounts: async () => {
-    const res = await fetch(`${API_BASE}/auth/authorized-accounts`);
+  register: async (payload: {
+    name: string;
+    email: string;
+    password: string;
+    admin_key: string;
+    role?: string;
+    organization?: string;
+  }) => {
+    const res = await fetch(`${API_BASE}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(res);
+  },
+
+  getAdminKeyInfo: async () => {
+    const res = await fetch(`${API_BASE}/auth/admin-key`);
     return handleResponse(res);
   },
 
