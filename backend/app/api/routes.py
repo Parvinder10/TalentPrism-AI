@@ -56,9 +56,12 @@ def reevaluate_candidates_for_job(job_reqs: List[Any]):
     normalized_reqs = [normalize_requirement(r) for r in job_reqs]
     for c_id, cand in candidates_store.items():
         portfolio = cand.get("all_skills_portfolio", {})
+        portfolio_lower = {k.lower(): v for k, v in portfolio.items()}
         new_evals = {}
         for req in normalized_reqs:
-            score = float(portfolio.get(req.name, 45.0))
+            req_l = req.name.lower()
+            canon_l = (req.canonical_skill or req.name).lower()
+            score = float(portfolio_lower.get(req_l, portfolio_lower.get(canon_l, 45.0)))
             gap = max(0.0, 100.0 - score)
             status = "SUPPORTED BY EVIDENCE" if score >= 80 else ("EXPLICITLY LISTED" if score >= 50 else "LIMITED EVIDENCE")
             new_evals[req.name] = CandidateSkillEval(
@@ -588,7 +591,6 @@ def create_job(payload: JobCreate):
     current_job = new_job
     PRECONFIGURED_ROLES[job_id] = new_job
     reevaluate_candidates_for_job(new_job["requirements"])
-    refresh_baseline_ranking()
 
     ranked, _ = scoring_engine.rank_candidates(
         list(candidates_store.values()),
@@ -597,6 +599,7 @@ def create_job(payload: JobCreate):
         previous_ranks=previous_ranks_cache,
         reason=f"Recruiter created and selected new role: {new_job['title']}"
     )
+    previous_ranks_cache = {c.id: c.rank for c in ranked}
 
     for r in ranked:
         if r.id in candidates_store:
@@ -663,10 +666,14 @@ def parse_jd_text_helper(text: str, filename: str = "") -> Dict[str, Any]:
         "Cybersecurity", "OWASP", "SOC2", "Penetration Testing", "IAM", "Unit Testing", "Jest"
     ]
     text_lower = text.lower()
+    tokens_set = set(re.findall(r"[a-z0-9+#.-]+", text_lower))
     for sk in comprehensive_skills:
         if sk not in detected_skills:
-            pattern = r"\b" + re.escape(sk.lower()) + r"\b"
-            if re.search(pattern, text_lower):
+            sk_lower = sk.lower()
+            if " " in sk_lower or "/" in sk_lower or "." in sk_lower:
+                if sk_lower in text_lower:
+                    detected_skills.append(sk)
+            elif sk_lower in tokens_set:
                 detected_skills.append(sk)
 
     # 3. Department Extraction / Inference
@@ -768,11 +775,47 @@ def parse_jd_text_helper(text: str, filename: str = "") -> Dict[str, Any]:
         "filename": filename or "Uploaded_JD"
     }
 
+def activate_parsed_jd(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Instantly registers, activates, and ranks candidates against newly uploaded or parsed JD in a single pass."""
+    global current_job, previous_ranks_cache
+    job_id = f"custom_jd_{uuid.uuid4().hex[:6]}"
+    norm_reqs = [normalize_requirement(r) for r in parsed["requirements"]]
+    new_job = {
+        "id": job_id,
+        "title": parsed["title"],
+        "department": parsed["department"],
+        "description": parsed["description"],
+        "requirements": norm_reqs
+    }
+    current_job = new_job
+    PRECONFIGURED_ROLES[job_id] = new_job
+    reevaluate_candidates_for_job(new_job["requirements"])
+
+    ranked, _ = scoring_engine.rank_candidates(
+        list(candidates_store.values()),
+        current_job["requirements"],
+        current_weights,
+        previous_ranks=previous_ranks_cache,
+        reason=f"Recruiter uploaded and activated new role: {new_job['title']}"
+    )
+    previous_ranks_cache = {c.id: c.rank for c in ranked}
+
+    for r in ranked:
+        if r.id in candidates_store:
+            candidates_store[r.id]["rank"] = r.rank
+            candidates_store[r.id]["overall_match"] = r.overall_match
+
+    parsed["job"] = new_job
+    parsed["ranked_candidates"] = ranked
+    parsed["all_roles"] = list(PRECONFIGURED_ROLES.values())
+    return parsed
+
 @router.post("/jobs/upload-jd")
-async def upload_job_description(file: UploadFile = File(...)):
+async def upload_job_description(file: UploadFile = File(...), auto_activate: bool = False):
     """
     Upload and intelligently parse a JD document (PDF, TXT, DOCX, MD):
     Extracts text -> auto-detects Title, Department, Description -> extracts & categorizes requirements.
+    When auto_activate=True, directly activates the role and ranks candidates in 1 single fast round trip.
     """
     contents = await file.read()
     filename = file.filename or "Uploaded_JD"
@@ -790,18 +833,26 @@ async def upload_job_description(file: UploadFile = File(...)):
     if not text.strip():
         text = "Senior Software Engineer responsible for building resilient backend microservices, distributed systems, and scalable APIs."
 
-    return parse_jd_text_helper(text, filename)
+    parsed = parse_jd_text_helper(text, filename)
+    if auto_activate:
+        return activate_parsed_jd(parsed)
+    return parsed
 
 @router.post("/jobs/parse-text")
-def parse_job_text(payload: Dict[str, str] = Body(...)):
+def parse_job_text(payload: Dict[str, Any] = Body(...)):
     """
     Parse pasted JD text:
     Auto-detects Title, Department, Description -> extracts & categorizes requirements.
+    When auto_activate=True, directly activates the role and ranks candidates in 1 single fast round trip.
     """
     text = payload.get("text", "").strip()
+    auto_activate = bool(payload.get("auto_activate", False))
     if not text:
         text = "Senior Full Stack Engineer responsible for modern web architecture, React, TypeScript, and REST APIs."
-    return parse_jd_text_helper(text, "Pasted_JD")
+    parsed = parse_jd_text_helper(text, "Pasted_JD")
+    if auto_activate:
+        return activate_parsed_jd(parsed)
+    return parsed
 
 @router.post("/jobs/{job_id}/parse")
 def parse_job_description(job_id: str, payload: Dict[str, str] = Body(...)):

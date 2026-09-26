@@ -150,11 +150,30 @@ export const api = {
     return handleResponse(res);
   },
 
+  uploadAndActivateJD: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/jobs/upload-jd?auto_activate=true`, {
+      method: 'POST',
+      body: formData,
+    });
+    return handleResponse(res);
+  },
+
   parseJDText: async (text: string) => {
     const res = await fetch(`${API_BASE}/jobs/parse-text`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
+    });
+    return handleResponse(res);
+  },
+
+  parseAndActivateJDText: async (text: string) => {
+    const res = await fetch(`${API_BASE}/jobs/parse-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, auto_activate: true }),
     });
     return handleResponse(res);
   },

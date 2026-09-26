@@ -118,10 +118,35 @@ export const RecruiterDashboard: React.FC<RecruiterDashboardProps> = ({
       let moderateCount = 0;
       let gapCount = 0;
 
-      candidates.forEach((cand) => {
-        const ev = cand.evidence_strength || 70;
-        if (ev >= 82) strongCount++;
-        else if (ev >= 60) moderateCount++;
+      const reqNameLower = req.name.toLowerCase();
+      candidates.forEach((cand: any) => {
+        let ev: number | undefined = undefined;
+        if (cand.skill_evals) {
+          if (cand.skill_evals[req.name]?.evidence_strength !== undefined) {
+            ev = cand.skill_evals[req.name].evidence_strength;
+          } else {
+            const evalKey = Object.keys(cand.skill_evals).find(
+              (k) => k.toLowerCase() === reqNameLower
+            );
+            if (evalKey) ev = cand.skill_evals[evalKey].evidence_strength;
+          }
+        }
+        if (ev === undefined && cand.all_skills_portfolio) {
+          if (cand.all_skills_portfolio[req.name] !== undefined) {
+            ev = cand.all_skills_portfolio[req.name];
+          } else {
+            const portKey = Object.keys(cand.all_skills_portfolio).find(
+              (k) => k.toLowerCase() === reqNameLower
+            );
+            if (portKey) ev = cand.all_skills_portfolio[portKey];
+          }
+        }
+        if (ev === undefined) {
+          ev = cand.evidence_strength ? Math.max(40, cand.evidence_strength - 15) : 55;
+        }
+
+        if (ev >= 78) strongCount++;
+        else if (ev >= 50) moderateCount++;
         else gapCount++;
       });
 

@@ -225,6 +225,51 @@ export const ManualAddJDModal: React.FC<ManualAddJDModalProps> = ({
     }
   };
 
+  const handleUploadAndActivate = async () => {
+    setExtractError(null);
+    if (uploadMethod === 'file') {
+      if (!selectedFile) {
+        setExtractError('Please select or drop a JD document file first.');
+        return;
+      }
+      try {
+        setIsExtracting(true);
+        const res = await api.uploadAndActivateJD(selectedFile);
+        if (res && res.success && res.job) {
+          onRoleCreated(res.job, res.ranked_candidates);
+          onClose();
+        } else {
+          setExtractError(res?.error || 'Failed to process and activate JD document.');
+        }
+      } catch (err: any) {
+        console.error('JD upload & activate error:', err);
+        setExtractError(err?.message || 'Failed to auto-activate JD document. Try extracting criteria first.');
+      } finally {
+        setIsExtracting(false);
+      }
+    } else {
+      if (!pastedText.trim()) {
+        setExtractError('Please paste JD text into the box above.');
+        return;
+      }
+      try {
+        setIsExtracting(true);
+        const res = await api.parseAndActivateJDText(pastedText);
+        if (res && res.success && res.job) {
+          onRoleCreated(res.job, res.ranked_candidates);
+          onClose();
+        } else {
+          setExtractError(res?.error || 'Failed to parse and activate JD text.');
+        }
+      } catch (err: any) {
+        console.error('JD parse & activate error:', err);
+        setExtractError(err?.message || 'Failed to auto-activate JD text.');
+      } finally {
+        setIsExtracting(false);
+      }
+    }
+  };
+
   const handleExtractJD = async () => {
     setExtractError(null);
     if (uploadMethod === 'file') {
@@ -471,25 +516,36 @@ export const ManualAddJDModal: React.FC<ManualAddJDModalProps> = ({
                 </div>
               )}
 
-              {/* Extraction Trigger Button */}
-              <div className="flex items-center justify-between gap-3">
+              {/* Extraction Trigger Buttons */}
+              <div className="flex flex-col sm:flex-row items-center gap-2.5">
                 <button
                   type="button"
-                  onClick={handleExtractJD}
-                  disabled={isExtracting || (uploadMethod === 'file' ? !selectedFile : !pastedText.trim())}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-600 hover:from-blue-500 hover:via-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-600/30 transition cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-40"
+                  onClick={handleUploadAndActivate}
+                  disabled={isExtracting || saving || (uploadMethod === 'file' ? !selectedFile : !pastedText.trim())}
+                  className="flex-1 w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white font-extrabold text-xs shadow-lg shadow-teal-500/25 transition cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-40"
                 >
                   {isExtracting ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Extracting through JD via NLP Intelligence...</span>
+                      <span>Extracting & Activating Role Instantly...</span>
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-4 h-4 text-cyan-200" />
-                      <span>Fetch & Extract Through JD Document</span>
+                      <Sparkles className="w-4 h-4 text-emerald-200" />
+                      <span>Auto-Extract & Activate JD (Instant)</span>
                     </>
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExtractJD}
+                  disabled={isExtracting || saving || (uploadMethod === 'file' ? !selectedFile : !pastedText.trim())}
+                  className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 hover:border-cyan-400 font-bold text-xs transition cursor-pointer flex items-center justify-center space-x-1.5 disabled:opacity-40"
+                  title="Extract criteria into form below so you can inspect and calibrate weights before activating"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Customize Criteria First</span>
                 </button>
               </div>
 
@@ -501,19 +557,29 @@ export const ManualAddJDModal: React.FC<ManualAddJDModalProps> = ({
                 </div>
               )}
 
-              {/* Extraction Success Notice */}
+              {/* Extraction Success Notice with Direct Activation */}
               {hasExtracted && (
-                <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/40 flex items-center justify-between text-emerald-300 text-xs shadow-sm">
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>
-                      ✓ JD Extracted: <strong>{title}</strong> ({department}) •{' '}
-                      <strong>{requirements.length} skill criteria</strong> identified!
-                    </span>
+                <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-emerald-300 text-xs shadow-md">
+                  <div className="flex items-center space-x-2.5">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <div>
+                      <p className="font-bold text-white">
+                        ✓ JD Extracted: <strong>{title}</strong> ({department})
+                      </p>
+                      <p className="text-[11px] text-emerald-300/80">
+                        <strong>{requirements.length} skill criteria</strong> identified! Ready to activate into candidate engine.
+                      </p>
+                    </div>
                   </div>
-                  <span className="text-[10px] text-emerald-400 font-mono uppercase font-bold">
-                    Ready to Activate
-                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={saving || !title.trim() || requirements.length === 0}
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow transition cursor-pointer flex items-center justify-center space-x-1 shrink-0"
+                  >
+                    <span>{saving ? 'Activating...' : 'Activate This Role Now'}</span>
+                    <ArrowRight className="w-3 h-3 text-slate-950" />
+                  </button>
                 </div>
               )}
             </div>

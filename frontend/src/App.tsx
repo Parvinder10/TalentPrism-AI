@@ -145,13 +145,18 @@ export function App() {
       setCandidates(filteredCandidates);
       storage.saveCachedCandidates(effectiveRoleId, filteredCandidates);
 
-      // Priority for requirements: calibrated user edits > jobData from API (empty when 'none')
+      // Priority for requirements: calibrated user edits > jobData from API > available role fallback (empty when 'none')
       if (effectiveRoleId === 'none') {
         setRequirements([]);
       } else if (calibratedReqs && calibratedReqs.length > 0) {
         setRequirements(calibratedReqs);
-      } else if (jobData?.requirements) {
+      } else if (jobData?.requirements && jobData.requirements.length > 0) {
         setRequirements(jobData.requirements);
+      } else {
+        const foundRole = mergedRoles.find((r) => r.id === effectiveRoleId);
+        if (foundRole?.requirements && foundRole.requirements.length > 0) {
+          setRequirements(foundRole.requirements);
+        }
       }
 
       setCurrentRoleId(effectiveRoleId);
@@ -269,6 +274,7 @@ export function App() {
 
   const handleRoleCreated = (newRole: JobRole, updatedCandidates?: RankedCandidate[]) => {
     storage.saveCustomRole(newRole);
+    storage.saveCalibratedRequirements(newRole.id, newRole.requirements || []);
     storage.setCurrentRoleId(newRole.id);
 
     setAvailableRoles((prev) => {
@@ -420,7 +426,13 @@ export function App() {
         {activeTab === 'dashboard' && (
           <RecruiterDashboard
             candidates={candidates}
-            requirements={requirements}
+            requirements={
+              currentRoleId === 'none'
+                ? []
+                : (requirements && requirements.length > 0
+                    ? requirements
+                    : (availableRoles.find((r) => r.id === currentRoleId)?.requirements || []))
+            }
             onSelectCandidate={handleSelectCandidate}
             onNavigateTab={setActiveTab}
             onStartDemoTour={() => setIsDemoTourOpen(true)}

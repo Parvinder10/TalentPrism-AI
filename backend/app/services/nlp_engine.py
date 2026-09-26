@@ -123,7 +123,7 @@ class NLPEngine:
 
         if self.nlp is not None:
             try:
-                doc = self.nlp(text[:25000]) # Limit length for performance
+                doc = self.nlp(text[:6000]) # Limit length for fast response
                 for ent in doc.ents:
                     val = ent.text.strip()
                     if ent.label_ == "ORG":
@@ -138,18 +138,28 @@ class NLPEngine:
             except Exception:
                 pass
 
-        # Match canonical skills in text
+        # Match canonical skills in text using high-speed O(1) token set lookup
         text_lower = text.lower()
+        tokens_set = set(re.findall(r"[a-z0-9+#.-]+", text_lower))
         for canonical, aliases in CANONICAL_SKILLS.items():
             matched = False
-            # Check canonical name
-            if re.search(r"\b" + re.escape(canonical.lower()) + r"\b", text_lower):
+            can_lower = canonical.lower()
+            if " " in can_lower:
+                if can_lower in text_lower:
+                    matched = True
+            elif can_lower in tokens_set:
                 matched = True
-            else:
+
+            if not matched:
                 for alias in aliases:
-                    if re.search(r"\b" + re.escape(alias) + r"\b", text_lower):
+                    if " " in alias or "-" in alias:
+                        if alias in text_lower:
+                            matched = True
+                            break
+                    elif alias in tokens_set:
                         matched = True
                         break
+
             if matched and canonical not in entities["skills"]:
                 entities["skills"].append(canonical)
 
