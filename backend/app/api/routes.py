@@ -578,7 +578,7 @@ def get_job(job_id: str):
 
 @router.post("/jobs")
 def create_job(payload: JobCreate):
-    global current_job
+    global current_job, previous_ranks_cache
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     norm_reqs = [normalize_requirement(r) for r in payload.requirements]
     new_job = {
