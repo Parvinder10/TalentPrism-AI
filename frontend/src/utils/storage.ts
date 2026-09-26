@@ -383,17 +383,9 @@ export function subscribeTabSync(callback: (message: { type: string; payload?: a
     syncBroadcastChannel.addEventListener('message', handler);
   }
 
-  const storageHandler = (e: StorageEvent) => {
-    if (e.key && e.key.startsWith(PREFIX)) {
-      callback({ type: 'STORAGE_CHANGE', payload: { key: e.key, newValue: e.newValue }, timestamp: Date.now() });
-    }
-  };
-  window.addEventListener('storage', storageHandler);
-
   return () => {
     if (syncBroadcastChannel) {
       syncBroadcastChannel.removeEventListener('message', handler);
     }
-    window.removeEventListener('storage', storageHandler);
   };
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { LoginPage } from './components/LoginPage';
 import { RecruiterDashboard } from './components/RecruiterDashboard';
@@ -101,10 +101,12 @@ export function App() {
     setIsManualAddJDOpen(true);
   };
 
+  const isLoadingInitialRef = useRef(false);
+
   useEffect(() => {
     loadInitialData();
 
-    // 1. Instant cross-tab real-time sync via BroadcastChannel & storage events
+    // Instant cross-tab real-time sync via BroadcastChannel
     const unsubscribe = subscribeTabSync((msg) => {
       if (!msg || !msg.type) return;
       switch (msg.type) {
@@ -147,43 +149,25 @@ export function App() {
           setCurrentUser(msg.payload?.user || null);
           break;
         case 'CANDIDATE_ADDED':
-        case 'STORAGE_CHANGE':
         case 'FULL_SYNC':
           loadInitialData(true);
           break;
       }
     });
 
-    // 2. Cross-browser focus sync (e.g. switching between Chrome & Edge)
-    const onFocusOrVisible = () => {
-      if (document.visibilityState === 'visible') {
-        loadInitialData(true);
-      }
-    };
-    window.addEventListener('focus', onFocusOrVisible);
-    document.addEventListener('visibilitychange', onFocusOrVisible);
-
-    // 3. Periodic background sync every 12s for side-by-side browser windows
-    const intervalTimer = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        loadInitialData(true);
-      }
-    }, 12000);
-
     return () => {
       unsubscribe();
-      window.removeEventListener('focus', onFocusOrVisible);
-      document.removeEventListener('visibilitychange', onFocusOrVisible);
-      clearInterval(intervalTimer);
     };
   }, []);
 
   const loadInitialData = async (silent: boolean = false) => {
+    if (isLoadingInitialRef.current) return;
+    isLoadingInitialRef.current = true;
     try {
       if (!silent && candidates.length === 0) {
         setLoading(true);
       }
-      let storedRoleId = storage.getCurrentRoleId('job_backend_core');
+      const storedRoleId = storage.getCurrentRoleId('job_backend_core');
       const customRoles = storage.getCustomRoles();
       const deletedRoleIds = storage.getDeletedRoleIds();
       const removedIds = storage.getRemovedCandidateIds();
@@ -213,14 +197,6 @@ export function App() {
         }
         if (syncRes.uploaded_candidates && Array.isArray(syncRes.uploaded_candidates) && syncRes.uploaded_candidates.length > 0) {
           storage.saveUploadedCandidates(syncRes.uploaded_candidates);
-        }
-        // Adopt server active_role_id if local was default or not explicitly set
-        const explicitLocalRoleId = localStorage.getItem('talentprism_current_role_id');
-        if (syncRes.active_role_id && (!explicitLocalRoleId || storedRoleId === 'job_backend_core')) {
-          if (syncRes.active_role_id !== storedRoleId) {
-            storedRoleId = syncRes.active_role_id;
-            storage.setCurrentRoleId(syncRes.active_role_id);
-          }
         }
       }
 
@@ -278,6 +254,7 @@ export function App() {
     } catch (e) {
       console.error('Failed to load initial data:', e);
     } finally {
+      isLoadingInitialRef.current = false;
       if (!silent) {
         setLoading(false);
       }

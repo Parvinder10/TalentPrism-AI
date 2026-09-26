@@ -169,7 +169,7 @@ def load_cloud_state() -> bool:
                 # 5. Active role ID
                 cloud_active_id = data.get("active_role_id")
                 if cloud_active_id and cloud_active_id != "none" and cloud_active_id in PRECONFIGURED_ROLES:
-                    if current_job.get("id") in ("job_backend_core", ""):
+                    if not current_job or not current_job.get("id"):
                         current_job = dict(PRECONFIGURED_ROLES[cloud_active_id])
                         current_job["requirements"] = [normalize_requirement(r) for r in current_job.get("requirements", [])]
 
@@ -178,17 +178,26 @@ def load_cloud_state() -> bool:
         print(f"[load_cloud_state] Cloud fetch warning: {e}")
     return False
 
+_last_cloud_sync_time = 0.0
+_cloud_sync_lock = threading.Lock()
+
 def save_cloud_state():
     """Sync persistent state to cloud storage bin so all ephemeral lambdas and devices stay synchronized."""
-    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users, deleted_candidate_ids
+    global current_job, candidates_store, current_weights, PRECONFIGURED_ROLES, registered_users, deleted_candidate_ids, _last_cloud_sync_time
+    now = time.time()
+    if now - _last_cloud_sync_time < 3.0:
+        return
+    if not _cloud_sync_lock.acquire(blocking=False):
+        return
     try:
+        _last_cloud_sync_time = time.time()
         # 1. Fetch current cloud state first to merge and prevent overwriting concurrent updates
         existing_cloud_users = {}
         existing_cloud_deleted = []
         existing_cloud_roles = {}
         try:
             req_get = urllib.request.Request(CLOUD_BIN_URL, headers={"User-Agent": "TalentPrism-Server/2.4"})
-            with urllib.request.urlopen(req_get, timeout=2.5) as get_resp:
+            with urllib.request.urlopen(req_get, timeout=2.0) as get_resp:
                 if get_resp.status == 200:
                     raw_get = get_resp.read().decode("utf-8")
                     if raw_get.strip():
@@ -237,10 +246,15 @@ def save_cloud_state():
             },
             method="PUT"
         )
-        with urllib.request.urlopen(req, timeout=3.5) as resp:
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
             pass
     except Exception as e:
         print(f"[save_cloud_state] Cloud PUT warning: {e}")
+    finally:
+        try:
+            _cloud_sync_lock.release()
+        except Exception:
+            pass
 
 def load_server_state(check_cloud: bool = False):
     """Load persistent shared state across serverless lambda invocations and browsers."""
@@ -855,41 +869,22 @@ def sync_state(payload: Dict[str, Any] = Body(...)):
             PRECONFIGURED_ROLES[r_id] = norm_r
             
     # 2. Set active role if specified
-    is_initial_load = bool(payload.get("is_initial_load", False))
     active_role_id = payload.get("active_role_id")
-    
-    if is_initial_load:
-        # If client is just starting up, preserve current active role on server if valid
-        if current_job.get("id") == "none":
-            pass
-        elif current_job.get("id") and current_job.get("id") in PRECONFIGURED_ROLES:
-            pass
-        elif active_role_id in ("none", "null", ""):
-            current_job = {
-                "id": "none",
-                "title": "No Active JD (Disconnected)",
-                "department": "None",
-                "description": "No job description is currently executing. All applicants displayed in general talent pool.",
-                "requirements": []
-            }
-        elif active_role_id and active_role_id in PRECONFIGURED_ROLES:
-            current_job = dict(PRECONFIGURED_ROLES[active_role_id])
-    else:
-        if active_role_id in ("none", "null", ""):
-            current_job = {
-                "id": "none",
-                "title": "No Active JD (Disconnected)",
-                "department": "None",
-                "description": "No job description is currently executing. All applicants displayed in general talent pool.",
-                "requirements": []
-            }
-        elif active_role_id and active_role_id in PRECONFIGURED_ROLES:
-            current_job = dict(PRECONFIGURED_ROLES[active_role_id])
+    if active_role_id in ("none", "null", ""):
+        current_job = {
+            "id": "none",
+            "title": "No Active JD (Disconnected)",
+            "department": "None",
+            "description": "No job description is currently executing. All applicants displayed in general talent pool.",
+            "requirements": []
+        }
+    elif active_role_id and active_role_id in PRECONFIGURED_ROLES:
+        current_job = dict(PRECONFIGURED_ROLES[active_role_id])
     
     # 3. Apply custom calibrated requirements if specified (only when active_role_id != 'none')
     if current_job.get("id") not in ("none", "null", ""):
         custom_reqs = payload.get("custom_requirements")
-        if custom_reqs and isinstance(custom_reqs, list) and len(custom_reqs) > 0 and not is_initial_load:
+        if custom_reqs and isinstance(custom_reqs, list) and len(custom_reqs) > 0:
             norm_custom_reqs = [normalize_requirement(r) for r in custom_reqs]
             current_job["requirements"] = norm_custom_reqs
             cur_id = current_job.get("id")
