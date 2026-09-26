@@ -5,15 +5,32 @@ def _normalize_eval(item: Any) -> CandidateSkillEval:
     if isinstance(item, CandidateSkillEval):
         return item
     if isinstance(item, dict):
-        return CandidateSkillEval(**item)
+        strength = float(item.get("evidence_strength", 50.0))
+        gap = float(item.get("evidence_gap", max(0.0, 100.0 - strength)))
+        return CandidateSkillEval(
+            skill_name=str(item.get("skill_name", "Skill")),
+            category=str(item.get("category", "REQUIRED")),
+            priority=str(item.get("priority", "High")),
+            detection_status=str(item.get("detection_status", "LIMITED EVIDENCE")),
+            evidence_strength=strength,
+            evidence_gap=gap,
+            is_semantic_match=bool(item.get("is_semantic_match", False)),
+            semantic_bridge_note=item.get("semantic_bridge_note"),
+            supporting_evidence_count=int(item.get("supporting_evidence_count", 1)),
+            why_explanation=list(item.get("why_explanation", ["Telemetry verified"])),
+            primary_source=str(item.get("primary_source", "Portfolio"))
+        )
+    strength = float(getattr(item, "evidence_strength", 50.0))
+    gap = float(getattr(item, "evidence_gap", max(0.0, 100.0 - strength)))
     return CandidateSkillEval(
         skill_name=str(getattr(item, "skill_name", "Skill")),
         category=str(getattr(item, "category", "REQUIRED")),
         priority=str(getattr(item, "priority", "High")),
         detection_status=str(getattr(item, "detection_status", "LIMITED EVIDENCE")),
-        evidence_strength=float(getattr(item, "evidence_strength", 50.0)),
-        evidence_gap=float(getattr(item, "evidence_gap", 50.0)),
+        evidence_strength=strength,
+        evidence_gap=gap,
         is_semantic_match=bool(getattr(item, "is_semantic_match", False)),
+        semantic_bridge_note=getattr(item, "semantic_bridge_note", None),
         supporting_evidence_count=int(getattr(item, "supporting_evidence_count", 1)),
         why_explanation=list(getattr(item, "why_explanation", ["Telemetry verified"])),
         primary_source=str(getattr(item, "primary_source", "Portfolio"))

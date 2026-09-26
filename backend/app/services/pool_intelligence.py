@@ -15,6 +15,13 @@ def _normalize_req(req: Any) -> JobRequirement:
         canonical_skill=str(getattr(req, "canonical_skill", getattr(req, "name", "Skill")))
     )
 
+def _get_eval_val(ev: Any, field: str, default: Any = None) -> Any:
+    if ev is None:
+        return default
+    if isinstance(ev, dict):
+        return ev.get(field, default)
+    return getattr(ev, field, default)
+
 class PoolIntelligenceEngine:
     def __init__(self):
         pass
@@ -42,7 +49,8 @@ class PoolIntelligenceEngine:
             skill_evals: Dict[str, CandidateSkillEval] = cand.get("skill_evals", {})
             for req in requirements:
                 ev = skill_evals.get(req.name)
-                if ev and ev.evidence_strength >= 50.0:
+                str_val = float(_get_eval_val(ev, "evidence_strength", 0.0))
+                if ev and str_val >= 50.0:
                     skill_counts[req.name] += 1
 
         skill_availability = []
@@ -73,7 +81,8 @@ class PoolIntelligenceEngine:
                 has_all = True
                 for sk in combo_skills:
                     ev = skill_evals.get(sk)
-                    if not ev or ev.evidence_strength < 50.0:
+                    str_val = float(_get_eval_val(ev, "evidence_strength", 0.0))
+                    if not ev or str_val < 50.0:
                         has_all = False
                         break
                 if has_all:
@@ -156,24 +165,24 @@ class PoolIntelligenceEngine:
 
             for r_name in required_cols:
                 ev = skill_evals.get(r_name)
-                score = ev.evidence_strength if ev else 0.0
+                score = float(_get_eval_val(ev, "evidence_strength", 0.0))
                 row["required_scores"][r_name] = round(score, 1)
                 row["evidence_details"][r_name] = {
                     "score": round(score, 1),
-                    "status": ev.detection_status if ev else "NOT DETECTED",
+                    "status": str(_get_eval_val(ev, "detection_status", "NOT DETECTED")),
                     "category": "REQUIRED",
-                    "why": ev.why_explanation if ev else ["No evidence detected"]
+                    "why": list(_get_eval_val(ev, "why_explanation", ["No evidence detected"]))
                 }
 
             for p_name in preferred_cols:
                 ev = skill_evals.get(p_name)
-                score = ev.evidence_strength if ev else 0.0
+                score = float(_get_eval_val(ev, "evidence_strength", 0.0))
                 row["preferred_scores"][p_name] = round(score, 1)
                 row["evidence_details"][p_name] = {
                     "score": round(score, 1),
-                    "status": ev.detection_status if ev else "NOT DETECTED",
+                    "status": str(_get_eval_val(ev, "detection_status", "NOT DETECTED")),
                     "category": "PREFERRED",
-                    "why": ev.why_explanation if ev else ["No evidence detected"]
+                    "why": list(_get_eval_val(ev, "why_explanation", ["No evidence detected"]))
                 }
 
             matrix_rows.append(row)

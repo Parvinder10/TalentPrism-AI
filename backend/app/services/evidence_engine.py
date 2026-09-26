@@ -7,6 +7,11 @@ from app.models.schemas import (
 )
 from app.services.nlp_engine import nlp_engine, CANONICAL_SKILLS
 
+def _ev_get(e: Any, attr: str, default: Any = None) -> Any:
+    if isinstance(e, dict):
+        return e.get(attr, default)
+    return getattr(e, attr, default)
+
 class EvidenceEngine:
     def __init__(self):
         pass
@@ -23,13 +28,16 @@ class EvidenceEngine:
         Evaluate candidate evidence for a given skill.
         Calculates evidence strength (0-100), detection status, and provides the 'WHY' explanation.
         """
-        skill_evidence = [e for e in evidence_list if e.skill_name.lower() == skill_name.lower()]
+        skill_evidence = [
+            e for e in (evidence_list or [])
+            if str(_ev_get(e, "skill_name", "")).lower() == skill_name.lower()
+        ]
         
         # If no direct evidence, check semantic bridge
         semantic_match = False
         semantic_note = None
         if not skill_evidence:
-            all_texts = [e.source_text for e in evidence_list]
+            all_texts = [str(_ev_get(e, "source_text", "")) for e in (evidence_list or [])]
             is_match, note, sim = nlp_engine.detect_semantic_bridge(skill_name, all_texts)
             if is_match:
                 semantic_match = True
@@ -76,13 +84,13 @@ class EvidenceEngine:
             )
 
         # Calculate evidence strength based on source types and context signals
-        has_work = any(e.source_type == "work_experience" for e in skill_evidence)
-        has_project = any(e.source_type == "project" for e in skill_evidence)
-        has_cert = any(e.source_type == "certification" for e in skill_evidence)
-        has_recent = any(e.is_recent for e in skill_evidence)
+        has_work = any(_ev_get(e, "source_type") == "work_experience" for e in skill_evidence)
+        has_project = any(_ev_get(e, "source_type") == "project" for e in skill_evidence)
+        has_cert = any(_ev_get(e, "source_type") == "certification" for e in skill_evidence)
+        has_recent = any(bool(_ev_get(e, "is_recent", False)) for e in skill_evidence)
         
         # Base score from max evidence item strength
-        base_strength = max((e.evidence_strength for e in skill_evidence), default=40.0)
+        base_strength = max((float(_ev_get(e, "evidence_strength", 40.0)) for e in skill_evidence), default=40.0)
         
         # Bonus for multiple corroborating sources
         if has_work and has_project:
@@ -103,12 +111,12 @@ class EvidenceEngine:
         # Detailed why explanation
         why_bullets = []
         for e in skill_evidence:
-            if e.context_signals:
-                for sig in e.context_signals:
-                    why_bullets.append(f"✓ {sig}")
-            if e.missing_context:
-                for mis in e.missing_context:
-                    why_bullets.append(f"✗ {mis}")
+            signals = _ev_get(e, "context_signals") or []
+            for sig in signals:
+                why_bullets.append(f"✓ {sig}")
+            missing = _ev_get(e, "missing_context") or []
+            for mis in missing:
+                why_bullets.append(f"✗ {mis}")
 
         if not why_bullets:
             if has_work:
@@ -120,7 +128,7 @@ class EvidenceEngine:
             if not has_work:
                 why_bullets.append(f"✗ No professional work context detected")
 
-        primary_source = skill_evidence[0].source_title if skill_evidence else "Resume"
+        primary_source = _ev_get(skill_evidence[0], "source_title", "Resume") if skill_evidence else "Resume"
 
         return CandidateSkillEval(
             skill_name=skill_name,
@@ -272,11 +280,16 @@ class EvidenceEngine:
             ))
 
         # Direct skill edges from evidence list
-        for ev in evidence_list:
-            sk_nid = f"sk_{ev.skill_name.lower().replace(' ', '_')}"
-            add_node(sk_nid, ev.skill_name, "skill", {
-                "strength": ev.evidence_strength,
-                "level": ev.evidence_strength_level
+        for ev in (evidence_list or []):
+            sk_name = _ev_get(ev, "skill_name", "")
+            if not sk_name:
+                continue
+            ev_strength = float(_ev_get(ev, "evidence_strength", 60.0))
+            ev_level = str(_ev_get(ev, "evidence_strength_level", "Medium"))
+            sk_nid = f"sk_{sk_name.lower().replace(' ', '_')}"
+            add_node(sk_nid, sk_name, "skill", {
+                "strength": ev_strength,
+                "level": ev_level
             })
             edge_id = f"e_cand_sk_{sk_nid}"
             if not any(e.id == edge_id for e in edges):
@@ -285,8 +298,8 @@ class EvidenceEngine:
                     source=cand_nid,
                     target=sk_nid,
                     label="HAS_SKILL",
-                    animated=ev.evidence_strength >= 80,
-                    strength=ev.evidence_strength / 100.0
+                    animated=ev_strength >= 80,
+                    strength=ev_strength / 100.0
                 ))
 
         return SkillGraphData(nodes=nodes, edges=edges)
@@ -306,7 +319,7 @@ class EvidenceEngine:
         for y in [2023, 2024, 2025, 2026]:
             years_map[y] = {"skills": set(), "experiences": [], "projects": []}
 
-        for exp in experiences:
+        for exp in (experiences or []):
             y = exp.get("year", 2024)
             if y not in years_map:
                 years_map[y] = {"skills": set(), "experiences": [], "projects": []}
@@ -314,7 +327,7 @@ class EvidenceEngine:
             for sk in exp.get("skills", []):
                 years_map[y]["skills"].add(sk)
 
-        for proj in projects:
+        for proj in (projects or []):
             y = proj.get("year", 2025)
             if y not in years_map:
                 years_map[y] = {"skills": set(), "experiences": [], "projects": []}
@@ -322,11 +335,15 @@ class EvidenceEngine:
             for sk in proj.get("skills", []):
                 years_map[y]["skills"].add(sk)
 
-        for ev in evidence_list:
-            if ev.start_year and ev.start_year in years_map:
-                years_map[ev.start_year]["skills"].add(ev.skill_name)
-            if ev.end_year and ev.end_year in years_map:
-                years_map[ev.end_year]["skills"].add(ev.skill_name)
+        for ev in (evidence_list or []):
+            start_year = _ev_get(ev, "start_year")
+            end_year = _ev_get(ev, "end_year")
+            sk_name = _ev_get(ev, "skill_name", "")
+            if sk_name:
+                if start_year and start_year in years_map:
+                    years_map[start_year]["skills"].add(sk_name)
+                if end_year and end_year in years_map:
+                    years_map[end_year]["skills"].add(sk_name)
 
         groups = []
         for yr in sorted(years_map.keys()):

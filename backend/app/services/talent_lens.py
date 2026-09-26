@@ -79,15 +79,32 @@ def _normalize_eval(item: Any) -> CandidateSkillEval:
     if isinstance(item, CandidateSkillEval):
         return item
     if isinstance(item, dict):
-        return CandidateSkillEval(**item)
+        strength = float(item.get("evidence_strength", 50.0))
+        gap = float(item.get("evidence_gap", max(0.0, 100.0 - strength)))
+        return CandidateSkillEval(
+            skill_name=str(item.get("skill_name", "Skill")),
+            category=str(item.get("category", "REQUIRED")),
+            priority=str(item.get("priority", "High")),
+            detection_status=str(item.get("detection_status", "LIMITED EVIDENCE")),
+            evidence_strength=strength,
+            evidence_gap=gap,
+            is_semantic_match=bool(item.get("is_semantic_match", False)),
+            semantic_bridge_note=item.get("semantic_bridge_note"),
+            supporting_evidence_count=int(item.get("supporting_evidence_count", 1)),
+            why_explanation=list(item.get("why_explanation", ["Telemetry verified"])),
+            primary_source=str(item.get("primary_source", "Portfolio"))
+        )
+    strength = float(getattr(item, "evidence_strength", 50.0))
+    gap = float(getattr(item, "evidence_gap", max(0.0, 100.0 - strength)))
     return CandidateSkillEval(
         skill_name=str(getattr(item, "skill_name", "Skill")),
         category=str(getattr(item, "category", "REQUIRED")),
         priority=str(getattr(item, "priority", "High")),
         detection_status=str(getattr(item, "detection_status", "LIMITED EVIDENCE")),
-        evidence_strength=float(getattr(item, "evidence_strength", 50.0)),
-        evidence_gap=float(getattr(item, "evidence_gap", 50.0)),
+        evidence_strength=strength,
+        evidence_gap=gap,
         is_semantic_match=bool(getattr(item, "is_semantic_match", False)),
+        semantic_bridge_note=getattr(item, "semantic_bridge_note", None),
         supporting_evidence_count=int(getattr(item, "supporting_evidence_count", 1)),
         why_explanation=list(getattr(item, "why_explanation", ["Telemetry verified"])),
         primary_source=str(getattr(item, "primary_source", "Portfolio"))
@@ -129,34 +146,37 @@ class TalentLensEngine:
                 "candidate_score": score,
                 "pool_average": pool_avg,
                 "difference": round(diff, 1),
-                "is_outperforming": diff >= 6.0,
-                "is_underperforming": diff <= -10.0
+                "is_outperforming": diff >= 5.0,
+                "is_underperforming": diff <= -8.0
             }
             pool_comparison.append(comp_entry)
 
             # Identification criteria
-            if score >= 75.0 or diff >= 8.0:
+            if score >= 75.0 or diff >= 6.0:
                 strengths.append(comp_entry)
-            elif score <= 55.0 or diff <= -12.0 or eval_item.evidence_gap >= 40.0:
+            elif score <= 55.0 or diff <= -10.0 or eval_item.evidence_gap >= 40.0:
                 suppressors.append(comp_entry)
 
         total_skills = max(1, len(skill_evals))
 
         # Dynamic suppression condition:
-        # A candidate is rank-suppressed if they possess genuine high-tier capability in core skills,
-        # but 1 or 2 unverified gaps pull down their composite ranking (candidates already at Rank #1 are not suppressed).
+        # Candidate has genuine high capability in core requirements,
+        # but 1 or more unverified gaps depress their composite standing
         if total_skills <= 3:
             has_strength = len(strengths) >= 1
         else:
-            has_strength = len(strengths) >= 2 or any(s["candidate_score"] >= 88.0 for s in strengths)
+            has_strength = len(strengths) >= 1 and (
+                len(strengths) >= 2 or
+                any(s["candidate_score"] >= 80.0 for s in strengths) or
+                any(s["difference"] >= 6.0 for s in strengths)
+            )
 
         has_suppressor = len(suppressors) >= 1
-        is_suppressed = has_strength and has_suppressor and current_rank >= 3
+        is_suppressed = has_strength and has_suppressor
 
         # Calculate estimated score penalty and potential recovery
         total_penalty = 0.0
         if suppressors:
-            # Each suppressor depresses composite match by proportional weight and gap
             for s in suppressors:
                 gap = max(15.0, 80.0 - s["candidate_score"])
                 single_penalty = (gap / 100.0) * (1.0 / total_skills) * 100.0 * 1.35
@@ -165,23 +185,39 @@ class TalentLensEngine:
         else:
             total_penalty = 0.0
 
-        recovered_score = round(min(97.0, overall_match + total_penalty), 1) if is_suppressed else overall_match
-        recovered_rank = max(1, min(current_rank - 1, max(1, int(current_rank * 0.3)))) if is_suppressed else current_rank
+        recovered_score = round(min(98.5, overall_match + total_penalty), 1) if is_suppressed else overall_match
+        if is_suppressed:
+            if current_rank > 1:
+                recovered_rank = max(1, min(current_rank - 1, max(1, int(current_rank * 0.35))))
+            else:
+                recovered_rank = 1
+        else:
+            recovered_rank = current_rank
 
         if is_suppressed:
             sup_names = ", ".join([s["skill"] for s in suppressors])
             str_names = ", ".join([s["skill"] for s in strengths])
             max_diff = max([s["difference"] for s in strengths]) if strengths else 15.0
-            top_strength = strengths[0]["skill"] if strengths else "Core Architecture"
+            top_strength = strengths[0]["skill"] if strengths else "Core Engineering"
 
-            headline = "HIDDEN CORE STRENGTH DETECTED (Rank Suppression)"
-            summary = (
-                f"Candidate demonstrates elite tier evidence across core capabilities ({str_names}), "
-                f"significantly outperforming applicant pool averages (up to +{int(max_diff)}% above benchmark). "
-                f"However, current rank #{current_rank} is disproportionately suppressed by concentrated uncertainty in: {sup_names}. "
-                f"This is not a generally low-evidence profile. The lower aggregate match ({overall_match}%) is concentrated around specific unverified requirements."
-            )
-            archetype = "SPECIALIST-LIKE EVIDENCE PROFILE (High Core Depth)" if any(s["candidate_score"] >= 90.0 for s in strengths) else "CONCENTRATED TALENT PROFILE"
+            if current_rank >= 2:
+                headline = "HIDDEN CORE STRENGTH DETECTED (Rank Suppression)"
+                summary = (
+                    f"Candidate demonstrates elite tier evidence across core capabilities ({str_names}), "
+                    f"significantly outperforming applicant pool averages (up to +{int(max_diff)}% above benchmark). "
+                    f"However, current rank #{current_rank} is disproportionately suppressed by concentrated uncertainty in: {sup_names}. "
+                    f"This is not a generally low-evidence profile. The lower aggregate match ({overall_match}%) is concentrated around specific unverified requirements."
+                )
+            else:
+                headline = "HIGH-PERFORMING TALENT WITH UNVERIFIED GAP"
+                summary = (
+                    f"Candidate leads the talent pool with standout evidence in core capabilities ({str_names}), "
+                    f"outperforming applicant benchmarks by up to +{int(max_diff)}%. "
+                    f"However, composite score ({overall_match}%) is currently depressed by isolated uncertainty in {sup_names}. "
+                    f"Targeted validation elevates estimated match to {recovered_score}%."
+                )
+
+            archetype = "SPECIALIST-LIKE EVIDENCE PROFILE (High Core Depth)" if any(s["candidate_score"] >= 88.0 for s in strengths) else "CONCENTRATED TALENT PROFILE"
             profile_desc = (
                 f"Exhibits deep technical specialization in {top_strength} and core domain components. "
                 f"Outperforms applicant pool averages by up to +{int(max_diff)}%, representing an exceptional technical asset "
@@ -189,7 +225,7 @@ class TalentLensEngine:
             )
             recruiter_strategy = (
                 f"Do not reject this candidate. {candidate_name} exhibits top-tier mastery in {str_names}. "
-                f"Current rank #{current_rank} is suppressed by unverified resume signals in {sup_names}. "
+                f"Current ranking is suppressed by unverified resume signals in {sup_names}. "
                 f"Rather than filtering out, utilize the AI Interview Intelligence module to directly probe hands-on {sup_names} capability. "
                 f"Validating these gaps elevates this candidate to an estimated {recovered_score}% match (advancing to Top #{recovered_rank})!"
             )
@@ -198,7 +234,8 @@ class TalentLensEngine:
                 for s in suppressors
             ]
         else:
-            str_names = ", ".join([s["skill"] for s in strengths[:3]]) if strengths else "standard requirements"
+            str_names = ", ".join([s["skill"] for s in strengths[:3]]) if strengths else "evaluated requirements"
+            max_diff = max([s["difference"] for s in strengths]) if strengths else 5.0
             if current_rank <= 3:
                 headline = "TOP-TIER HIGH-ALIGNMENT PROFILE"
                 archetype = "WELL-BALANCED ENTERPRISE ARCHITECT"
@@ -207,25 +244,25 @@ class TalentLensEngine:
                     f"Demonstrates dependable technical breadth with zero concentrated operational gaps."
                 )
             else:
-                headline = "CONSISTENT COMPETENCY PROFILE"
+                headline = "BALANCED MULTI-DOMAIN COMPETENCY"
                 archetype = "BALANCED EVIDENCE PROFILE"
                 profile_desc = (
-                    f"Demonstrates balanced coverage matching applicant pool benchmarks across competencies. "
-                    f"Evidence distribution shows steady, predictable capability without high-variance skill spikes."
+                    f"Demonstrates balanced coverage matching applicant pool benchmarks across competencies ({str_names}). "
+                    f"Evidence distribution shows steady, predictable capability across primary operational domains."
                 )
 
             summary = (
-                f"Candidate demonstrates a {archetype.lower()} matching general pool expectations. "
+                f"Candidate demonstrates a {archetype.lower()} matching or exceeding general pool expectations. "
                 f"Evidence distribution shows steady capability across core requirements ({str_names}), "
                 f"with consistent alignment to role expectations and manageable onboarding variance."
             )
             recruiter_strategy = (
-                f"{candidate_name} presents a dependable, well-distributed candidate profile across requirements. "
-                f"Advance through standard technical screening with a focus on architecture scalability and cross-functional leadership."
+                f"{candidate_name} presents a dependable, well-distributed candidate profile across requirements ({str_names}). "
+                f"Advance through standard technical screening with a focus on system scalability and peer code review standards."
             )
             interview_focus = [
-                "Probe complex production failure scenarios and distributed architecture decision-making",
-                "Verify end-to-end telemetry, CI/CD operational hygiene, and peer code review standards"
+                f"Probe complex production failure scenarios and distributed architecture decision-making in {str_names}",
+                "Verify end-to-end telemetry, CI/CD operational hygiene, and system resilience under load"
             ]
 
         return TalentLensInsight(

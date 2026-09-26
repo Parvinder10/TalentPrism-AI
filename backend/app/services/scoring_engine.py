@@ -6,6 +6,15 @@ from app.models.schemas import (
 import datetime
 import uuid
 
+def _get_strength(eval_obj: Any) -> float:
+    if eval_obj is None:
+        return 0.0
+    if isinstance(eval_obj, (int, float)):
+        return float(eval_obj)
+    if isinstance(eval_obj, dict):
+        return float(eval_obj.get("evidence_strength", 0.0))
+    return float(getattr(eval_obj, "evidence_strength", 0.0))
+
 class ScoringEngine:
     def __init__(self):
         self.default_weights = ScoringWeights()
@@ -50,14 +59,14 @@ class ScoringEngine:
         preferred_reqs = [r for r in normalized_reqs if r.category == "PREFERRED"]
         bonus_reqs = [r for r in normalized_reqs if r.category == "BONUS"]
 
-        skill_evals: Dict[str, CandidateSkillEval] = candidate.get("skill_evals", {})
+        skill_evals: Dict[str, Any] = candidate.get("skill_evals", {})
 
         # 1. Required Coverage
         req_strengths = []
         req_detected_count = 0
         for r in required_reqs:
             eval_item = skill_evals.get(r.name)
-            str_val = eval_item.evidence_strength if eval_item else 0.0
+            str_val = _get_strength(eval_item)
             req_strengths.append(str_val * r.weight)
             if str_val >= 50.0:
                 req_detected_count += 1
@@ -70,7 +79,7 @@ class ScoringEngine:
         pref_detected_count = 0
         for p in preferred_reqs:
             eval_item = skill_evals.get(p.name)
-            str_val = eval_item.evidence_strength if eval_item else 0.0
+            str_val = _get_strength(eval_item)
             pref_strengths.append(str_val * p.weight)
             if str_val >= 50.0:
                 pref_detected_count += 1
@@ -81,7 +90,7 @@ class ScoringEngine:
         # 3. Overall Evidence Strength across all role skills
         all_evals = list(skill_evals.values())
         if all_evals:
-            avg_evidence_strength = sum(e.evidence_strength for e in all_evals) / len(all_evals)
+            avg_evidence_strength = sum(_get_strength(e) for e in all_evals) / len(all_evals)
         else:
             avg_evidence_strength = candidate.get("raw_evidence_strength", 65.0)
 
@@ -163,13 +172,13 @@ class ScoringEngine:
             skill_evals = cand.get("skill_evals", {})
             for r in requirements:
                 if r.category == "REQUIRED" and r.name in skill_evals:
-                    if skill_evals[r.name].evidence_strength < 50.0:
+                    if _get_strength(skill_evals[r.name]) < 50.0:
                         major_gap = r.name
                         break
             if not major_gap:
                 for r in requirements:
                     if r.category == "PREFERRED" and r.name in skill_evals:
-                        if skill_evals[r.name].evidence_strength < 45.0:
+                        if _get_strength(skill_evals[r.name]) < 45.0:
                             major_gap = r.name
                             break
 
@@ -177,16 +186,17 @@ class ScoringEngine:
             has_talent_lens = cand.get("is_suppressed", False)
             if not has_talent_lens and skill_evals:
                 scores = [
-                    getattr(v, "evidence_strength", v) if not isinstance(v, dict) else v.get("evidence_strength", 50.0)
+                    _get_strength(v)
                     for v in skill_evals.values()
                 ]
-                high_thresh = 1 if len(scores) <= 3 or any(s >= 88.0 for s in scores) else 2
+                high_thresh = 1 if len(scores) <= 3 or any(s >= 80.0 for s in scores) else 2
                 high_count = sum(1 for s in scores if s >= 75.0)
                 low_count = sum(1 for s in scores if s <= 55.0)
-                if high_count >= high_thresh and low_count >= 1 and current_rank >= 3:
+                if high_count >= high_thresh and low_count >= 1:
                     has_talent_lens = True
-            # Rank 1-2 top performers are leading the pool and cannot be rank suppressed
-            if current_rank <= 2:
+
+            # Rank 1 without any significant gap is considered fully aligned
+            if current_rank <= 1 and not any(_get_strength(v) <= 45.0 for v in skill_evals.values()):
                 has_talent_lens = False
 
             tl_badge = "Hidden Core Strength" if has_talent_lens else None

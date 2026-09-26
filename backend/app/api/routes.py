@@ -62,6 +62,15 @@ def normalize_requirement(req: Any) -> JobRequirement:
         canonical_skill=str(getattr(req, "canonical_skill", getattr(req, "name", "Skill")))
     )
 
+def _safe_get_strength(eval_obj: Any, default: float = 50.0) -> float:
+    if eval_obj is None:
+        return default
+    if isinstance(eval_obj, (int, float)):
+        return float(eval_obj)
+    if isinstance(eval_obj, dict):
+        return float(eval_obj.get("evidence_strength", default))
+    return float(getattr(eval_obj, "evidence_strength", default))
+
 def serialize_requirement(req: Any) -> Dict[str, Any]:
     if hasattr(req, "model_dump"):
         return req.model_dump()
@@ -1333,26 +1342,52 @@ async def upload_resume(file: UploadFile = File(...)):
         lang_res = nlp_engine.detect_language(text)
         entities = nlp_engine.extract_entities_with_spacy(text)
 
-        cand_id = f"cand_upload_{uuid.uuid4().hex[:6]}"
-        cand_name = re.sub(r"\.(pdf|docx?|txt|md)$", "", filename, flags=re.IGNORECASE)
-        cand_name = re.sub(r"[_\-]+", " ", cand_name).strip().title()
+        cand_id = f"cand_upload_{uuid.uuid4().hex[:8]}"
+        clean_file = re.sub(r"\.(pdf|docx?|txt|md)$", "", filename, flags=re.IGNORECASE)
+        clean_file = re.sub(r"[_\-]+", " ", clean_file).strip().title()
+
+        # Check if filename is generic (like "Resume", "CV", "My_CV", "Upload")
+        is_generic = clean_file.lower() in ("resume", "cv", "my cv", "my resume", "curriculum vitae", "document", "candidate", "uploaded candidate", "profile")
+        if is_generic and entities.get("persons"):
+            cand_name = entities["persons"][0].title()
+        elif is_generic:
+            first_line = text.strip().split("\n")[0].strip() if text else ""
+            if 3 <= len(first_line) <= 40 and not any(char in first_line for char in "{}[]()<>:;/?"):
+                cand_name = first_line.title()
+            else:
+                cand_name = clean_file
+        else:
+            cand_name = clean_file
         if len(cand_name) <= 2:
             cand_name = f"Candidate {uuid.uuid4().hex[:4].upper()}"
 
         job_reqs = get_current_job_requirements()
 
+        # Build complete skill portfolio from extracted entities and role requirements
+        extracted_skills = entities.get("skills", [])
+        portfolio = {}
+        for s in extracted_skills:
+            portfolio[s] = 85.0
+        for req in job_reqs:
+            if req.name in portfolio:
+                portfolio[req.name] = 85.0
+            elif req.name in extracted_skills:
+                portfolio[req.name] = 85.0
+            else:
+                portfolio[req.name] = 45.0
+
         # Create candidate evidence from extracted skills
         evals = {}
         ev_list = []
         for req in job_reqs:
-            has_skill = req.name in entities.get("skills", [])
-            score = 82.0 if has_skill else 35.0
+            has_skill = req.name in extracted_skills
+            score = portfolio.get(req.name, 82.0 if has_skill else 35.0)
             gap = 100.0 - score
             eval_item = CandidateSkillEval(
                 skill_name=req.name,
                 category=req.category,
                 priority=req.priority,
-                detection_status="SUPPORTED BY EVIDENCE" if score >= 80 else "LIMITED EVIDENCE",
+                detection_status="SUPPORTED BY EVIDENCE" if score >= 80 else ("EXPLICITLY LISTED" if score >= 50 else "LIMITED EVIDENCE"),
                 evidence_strength=score,
                 evidence_gap=gap,
                 is_semantic_match=False,
@@ -1379,35 +1414,55 @@ async def upload_resume(file: UploadFile = File(...)):
                 is_recent=True
             ))
 
+        # Also add non-requirement extracted skills to evidence list for knowledge graph and timeline
+        for s in extracted_skills:
+            if s not in evals:
+                ev_list.append(EvidenceItem(
+                    id=f"ev_{cand_id}_{s.lower().replace(' ', '_')}",
+                    candidate_id=cand_id,
+                    skill_name=s,
+                    source_type="work_experience",
+                    source_title=f"Parsed from {filename}",
+                    source_text=f"Demonstrated {s} capabilities in uploaded resume.",
+                    original_language=lang_res["code"],
+                    classification="CONTEXTUALLY_SUPPORTED",
+                    evidence_strength=85.0,
+                    evidence_strength_level="HIGH",
+                    start_year=2024,
+                    end_year=2025,
+                    is_recent=True
+                ))
+
         new_cand = {
             "id": cand_id,
             "name": cand_name,
             "email": f"{cand_name.lower().replace(' ', '.')}@upload.io",
-            "current_title": "Backend Software Engineer",
+            "current_title": "Software Engineer",
             "current_company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
-            "years_of_experience": 3.0,
+            "years_of_experience": 3.5,
             "language": lang_res["code"],
             "has_recent_activity": True,
             "is_suppressed": False,
             "archetype": "BALANCED EVIDENCE PROFILE",
-            "raw_evidence_strength": 68.0,
+            "raw_evidence_strength": 72.0,
             "skill_evals": evals,
+            "all_skills_portfolio": portfolio,
             "evidence_list": ev_list,
             "experiences": [
                 {
                     "company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
-                    "role": "Backend Engineer",
+                    "role": "Software Engineer",
                     "years": "2023 - Present",
                     "year": 2024,
-                    "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:4]
+                    "skills": list(extracted_skills[:4]) if extracted_skills else ["Python", "FastAPI"]
                 }
             ],
             "projects": [
                 {
-                    "title": "Cloud Platform Service",
+                    "title": "Software Platform Service",
                     "year": 2024,
-                    "description": "High performance backend platform.",
-                    "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:3]
+                    "description": "High performance software system.",
+                    "skills": list(extracted_skills[:3]) if extracted_skills else ["Python", "FastAPI"]
                 }
             ],
             "education": entities.get("schools", ["University Degree"]),
@@ -1417,8 +1472,28 @@ async def upload_resume(file: UploadFile = File(...)):
 
         candidates_store[cand_id] = new_cand
         refresh_baseline_ranking()
+        ranked, _ = scoring_engine.rank_candidates(
+            list(candidates_store.values()),
+            current_job["requirements"],
+            current_weights,
+            previous_ranks=previous_ranks_cache
+        )
+        for r in ranked:
+            if r.id in candidates_store:
+                candidates_store[r.id]["rank"] = r.rank
+                candidates_store[r.id]["overall_match"] = r.overall_match
+                if r.id == cand_id:
+                    new_cand["rank"] = r.rank
+                    new_cand["overall_match"] = r.overall_match
+                    new_cand["has_talent_lens_alert"] = r.has_talent_lens_alert
+                    new_cand["talent_lens_badge"] = r.talent_lens_badge
+                    new_cand["is_suppressed"] = r.has_talent_lens_alert
+                    candidates_store[cand_id]["has_talent_lens_alert"] = r.has_talent_lens_alert
+                    candidates_store[cand_id]["talent_lens_badge"] = r.talent_lens_badge
+                    candidates_store[cand_id]["is_suppressed"] = r.has_talent_lens_alert
+
         save_server_state()
-        return {"candidate": new_cand, "language": lang_res, "entities": entities}
+        return {"candidate": new_cand, "language": lang_res, "entities": entities, "ranked_candidates": ranked}
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1451,24 +1526,49 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
             lang_res = nlp_engine.detect_language(text)
             entities = nlp_engine.extract_entities_with_spacy(text)
 
-            cand_id = f"cand_upload_{uuid.uuid4().hex[:6]}"
-            cand_name = re.sub(r"\.(pdf|docx?|txt|md)$", "", filename, flags=re.IGNORECASE)
-            cand_name = re.sub(r"[_\-]+", " ", cand_name).strip().title()
+            cand_id = f"cand_upload_{uuid.uuid4().hex[:8]}"
+            clean_file = re.sub(r"\.(pdf|docx?|txt|md)$", "", filename, flags=re.IGNORECASE)
+            clean_file = re.sub(r"[_\-]+", " ", clean_file).strip().title()
+
+            is_generic = clean_file.lower() in ("resume", "cv", "my cv", "my resume", "curriculum vitae", "document", "candidate", "uploaded candidate", "profile")
+            if is_generic and entities.get("persons"):
+                cand_name = entities["persons"][0].title()
+            elif is_generic:
+                first_line = text.strip().split("\n")[0].strip() if text else ""
+                if 3 <= len(first_line) <= 40 and not any(char in first_line for char in "{}[]()<>:;/?"):
+                    cand_name = first_line.title()
+                else:
+                    cand_name = clean_file
+            else:
+                cand_name = clean_file
             if len(cand_name) <= 2:
                 cand_name = f"Candidate {uuid.uuid4().hex[:4].upper()}"
+
+            # Build complete skill portfolio
+            extracted_skills = entities.get("skills", [])
+            portfolio = {}
+            for s in extracted_skills:
+                portfolio[s] = 85.0
+            for req in job_reqs:
+                if req.name in portfolio:
+                    portfolio[req.name] = 85.0
+                elif req.name in extracted_skills:
+                    portfolio[req.name] = 85.0
+                else:
+                    portfolio[req.name] = 45.0
 
             # Create candidate evidence from extracted skills
             evals = {}
             ev_list = []
             for req in job_reqs:
-                has_skill = req.name in entities.get("skills", [])
-                score = 82.0 if has_skill else 35.0
+                has_skill = req.name in extracted_skills
+                score = portfolio.get(req.name, 82.0 if has_skill else 35.0)
                 gap = 100.0 - score
                 eval_item = CandidateSkillEval(
                     skill_name=req.name,
                     category=req.category,
                     priority=req.priority,
-                    detection_status="SUPPORTED BY EVIDENCE" if score >= 80 else "LIMITED EVIDENCE",
+                    detection_status="SUPPORTED BY EVIDENCE" if score >= 80 else ("EXPLICITLY LISTED" if score >= 50 else "LIMITED EVIDENCE"),
                     evidence_strength=score,
                     evidence_gap=gap,
                     is_semantic_match=False,
@@ -1495,19 +1595,39 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
                     is_recent=True
                 ))
 
+            # Also add non-requirement extracted skills to evidence list for knowledge graph and timeline
+            for s in extracted_skills:
+                if s not in evals:
+                    ev_list.append(EvidenceItem(
+                        id=f"ev_{cand_id}_{s.lower().replace(' ', '_')}",
+                        candidate_id=cand_id,
+                        skill_name=s,
+                        source_type="work_experience",
+                        source_title=f"Parsed from {filename}",
+                        source_text=f"Demonstrated {s} capabilities in uploaded resume.",
+                        original_language=lang_res["code"],
+                        classification="CONTEXTUALLY_SUPPORTED",
+                        evidence_strength=85.0,
+                        evidence_strength_level="HIGH",
+                        start_year=2024,
+                        end_year=2025,
+                        is_recent=True
+                    ))
+
             new_cand = {
                 "id": cand_id,
                 "name": cand_name,
                 "email": f"{cand_name.lower().replace(' ', '.')}@upload.io",
                 "current_title": "Software Engineer",
                 "current_company": entities.get("companies", ["Tech Corp"])[0] if entities.get("companies") else "Tech Corp",
-                "years_of_experience": 3.0,
+                "years_of_experience": 3.5,
                 "language": lang_res["code"],
                 "has_recent_activity": True,
                 "is_suppressed": False,
                 "archetype": "BALANCED EVIDENCE PROFILE",
-                "raw_evidence_strength": 68.0,
+                "raw_evidence_strength": 72.0,
                 "skill_evals": evals,
+                "all_skills_portfolio": portfolio,
                 "evidence_list": ev_list,
                 "experiences": [
                     {
@@ -1515,7 +1635,7 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
                         "role": "Software Engineer",
                         "years": "2023 - Present",
                         "year": 2024,
-                        "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:4]
+                        "skills": list(extracted_skills[:4]) if extracted_skills else ["Python", "FastAPI"]
                     }
                 ],
                 "projects": [
@@ -1523,7 +1643,7 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
                         "title": "Software Platform Service",
                         "year": 2024,
                         "description": "High performance software system.",
-                        "skills": list(entities.get("skills", ["Python", "FastAPI"]))[:3]
+                        "skills": list(extracted_skills[:3]) if extracted_skills else ["Python", "FastAPI"]
                     }
                 ],
                 "education": entities.get("schools", ["University Degree"]),
@@ -1547,6 +1667,18 @@ async def upload_resumes_batch(files: List[UploadFile] = File(...)):
             if r.id in candidates_store:
                 candidates_store[r.id]["rank"] = r.rank
                 candidates_store[r.id]["overall_match"] = r.overall_match
+
+        for c in created_candidates:
+            matched_r = next((r for r in ranked if r.id == c["id"]), None)
+            if matched_r:
+                c["rank"] = matched_r.rank
+                c["overall_match"] = matched_r.overall_match
+                c["has_talent_lens_alert"] = matched_r.has_talent_lens_alert
+                c["talent_lens_badge"] = matched_r.talent_lens_badge
+                c["is_suppressed"] = matched_r.has_talent_lens_alert
+                candidates_store[c["id"]]["has_talent_lens_alert"] = matched_r.has_talent_lens_alert
+                candidates_store[c["id"]]["talent_lens_badge"] = matched_r.talent_lens_badge
+                candidates_store[c["id"]]["is_suppressed"] = matched_r.has_talent_lens_alert
 
         save_server_state()
 
@@ -1922,8 +2054,8 @@ def get_candidate_talent_lens(candidate_id: str):
         scores = []
         for c in active_cands:
             ev = (c.get("skill_evals") or {}).get(r.name)
-            if ev:
-                scores.append(getattr(ev, "evidence_strength", 50.0) if not isinstance(ev, dict) else ev.get("evidence_strength", 50.0))
+            if ev is not None:
+                scores.append(_safe_get_strength(ev, 50.0))
         if scores:
             dynamic_averages[r.name] = round(sum(scores) / len(scores), 1)
 
@@ -1951,8 +2083,8 @@ def get_talent_rescue(job_id: str):
         scores = []
         for c in active_cands:
             ev = (c.get("skill_evals") or {}).get(r.name)
-            if ev:
-                scores.append(getattr(ev, "evidence_strength", 50.0) if not isinstance(ev, dict) else ev.get("evidence_strength", 50.0))
+            if ev is not None:
+                scores.append(_safe_get_strength(ev, 50.0))
         if scores:
             dynamic_averages[r.name] = round(sum(scores) / len(scores), 1)
 
@@ -1990,8 +2122,8 @@ def get_talent_rescue(job_id: str):
     if not within_role_candidates and len(active_cands) >= 3:
         for cand in active_cands:
             evals = cand.get("skill_evals", {})
-            gaps = [k for k, v in evals.items() if getattr(v, "evidence_strength", 50.0) <= 55.0]
-            highs = [k for k, v in evals.items() if getattr(v, "evidence_strength", 50.0) >= 75.0]
+            gaps = [k for k, v in evals.items() if _safe_get_strength(v) <= 55.0]
+            highs = [k for k, v in evals.items() if _safe_get_strength(v) >= 75.0]
             if gaps and highs:
                 lens = talent_lens.analyze_candidate(
                     candidate_id=cand["id"],
@@ -2063,14 +2195,19 @@ def simulate_candidate_skill(candidate_id: str, payload: SkillScenarioRequest):
             original_score = portfolio.get(payload.skill_name)
             if original_score is None:
                 eval_item = c["skill_evals"].get(payload.skill_name)
-                original_score = eval_item.evidence_strength if eval_item else 30.0
+                original_score = _safe_get_strength(eval_item, 30.0)
 
             # Update or create the skill evaluation
             eval_item = c["skill_evals"].get(payload.skill_name)
             if eval_item:
-                eval_item.evidence_strength = payload.simulated_evidence_strength
-                eval_item.evidence_gap = max(0.0, 100.0 - payload.simulated_evidence_strength)
-                eval_item.detection_status = "SUPPORTED BY EVIDENCE" if payload.simulated_evidence_strength >= 70 else "EXPLICITLY LISTED"
+                if isinstance(eval_item, dict):
+                    eval_item["evidence_strength"] = payload.simulated_evidence_strength
+                    eval_item["evidence_gap"] = max(0.0, 100.0 - payload.simulated_evidence_strength)
+                    eval_item["detection_status"] = "SUPPORTED BY EVIDENCE" if payload.simulated_evidence_strength >= 70 else "EXPLICITLY LISTED"
+                else:
+                    eval_item.evidence_strength = payload.simulated_evidence_strength
+                    eval_item.evidence_gap = max(0.0, 100.0 - payload.simulated_evidence_strength)
+                    eval_item.detection_status = "SUPPORTED BY EVIDENCE" if payload.simulated_evidence_strength >= 70 else "EXPLICITLY LISTED"
             else:
                 c["skill_evals"][payload.skill_name] = CandidateSkillEval(
                     skill_name=payload.skill_name,
@@ -2098,7 +2235,7 @@ def simulate_candidate_skill(candidate_id: str, payload: SkillScenarioRequest):
     cand_portfolio = dict(cand.get("all_skills_portfolio", {}))
     for sk, ev in cand.get("skill_evals", {}).items():
         if sk not in cand_portfolio:
-            cand_portfolio[sk] = ev.evidence_strength
+            cand_portfolio[sk] = _safe_get_strength(ev, 50.0)
 
     return {
         "candidate_id": candidate_id,
@@ -2154,7 +2291,7 @@ def pool_candidates_by_skills(job_id: str, payload: Dict[str, Any] = Body(...)):
             score = portfolio.get(sk)
             if score is None:
                 eval_item = cand.get("skill_evals", {}).get(sk)
-                score = eval_item.evidence_strength if eval_item else 0.0
+                score = _safe_get_strength(eval_item, 0.0)
             
             skill_scores[sk] = float(score)
             if score >= 50.0:
