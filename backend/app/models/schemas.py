@@ -34,7 +34,7 @@ class EvidenceStrengthLevel(str):
 
 # Job Requirement
 class JobRequirement(BaseModel):
-    id: str
+    id: Optional[str] = None
     name: str
     category: str = "REQUIRED" # REQUIRED, PREFERRED, BONUS
     priority: str = "Critical" # Critical, High, Medium, Low

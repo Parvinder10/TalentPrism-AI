@@ -3,6 +3,7 @@ import re
 import hashlib
 import os
 import json
+import time
 import tempfile
 import urllib.request
 import urllib.error
@@ -50,11 +51,16 @@ deleted_candidate_ids: Set[str] = set()
 def normalize_requirement(req: Any) -> JobRequirement:
     """Safely converts a dict or model into a valid JobRequirement instance."""
     if isinstance(req, JobRequirement):
+        if not req.id:
+            req.id = f"req_{uuid.uuid4().hex[:6]}"
         return req
     if isinstance(req, dict):
-        return JobRequirement(**req)
+        d = dict(req)
+        if not d.get("id"):
+            d["id"] = f"req_{uuid.uuid4().hex[:6]}"
+        return JobRequirement(**d)
     return JobRequirement(
-        id=str(getattr(req, "id", f"req_{uuid.uuid4().hex[:6]}")),
+        id=str(getattr(req, "id", None) or f"req_{uuid.uuid4().hex[:6]}"),
         name=str(getattr(req, "name", "Skill")),
         category=str(getattr(req, "category", "REQUIRED")),
         priority=str(getattr(req, "priority", "High")),
